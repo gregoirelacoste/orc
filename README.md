@@ -6,45 +6,71 @@ Un agent Claude Code 100% autonome qui construit un produit de A à Z : veille m
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installé et authentifié
 - Git
-- [GitHub CLI](https://cli.github.com/) (`gh`) — optionnel, pour créer le repo distant automatiquement
+- [GitHub CLI](https://cli.github.com/) (`gh`) — optionnel, pour créer le repo distant
 
 ## Démarrage rapide
 
 ```bash
-# 1. Cloner
-git clone git@github.com:gregoirelacoste/autonome-agent.git mon-projet
-cd mon-projet
+# 1. Cloner le template
+git clone git@github.com:gregoirelacoste/autonome-agent.git
+cd autonome-agent
 
-# 2. Initialiser (interactif)
-./init.sh
+# 2. Initialiser un projet (crée un workspace séparé)
+./init.sh pc-builder
 
-# 3. Lancer l'agent autonome
+# 3. Aller dans le workspace et lancer
+cd ../pc-builder
 ./orchestrator.sh
 ```
 
-C'est tout. `init.sh` te guide pour tout le reste.
+## Comment ça marche
 
-## Que fait `init.sh` ?
+### `init.sh` crée un workspace séparé
 
-L'assistant d'initialisation en 5 étapes :
+```
+autonome-agent/              ← ce repo (template, jamais modifié)
+│
+└── ./init.sh mon-projet
+         │
+         ▼
+../mon-projet/               ← workspace auto-contenu
+├── BRIEF.md                 ← brief produit (rédigé avec Claude)
+├── config.sh                ← configuration du projet
+├── orchestrator.sh          ← copié depuis le template
+├── phases/                  ← copié depuis le template
+├── skills-templates/        ← copié depuis le template
+├── logs/                    ← logs de l'orchestrateur
+│
+└── project/                 ← le code produit (son propre repo git)
+    ├── .git/
+    ├── CLAUDE.md            ← auto-généré et auto-amélioré
+    ├── ROADMAP.md           ← auto-généré, évolue avec le projet
+    ├── .claude/skills/      ← auto-générées par Claude
+    ├── research/            ← veille marché
+    ├── src/                 ← code applicatif
+    └── e2e/                 ← tests Playwright
+```
+
+Le template reste propre. Chaque projet a son workspace isolé.
+Le code produit dans `project/` a son propre git et peut être pushé vers GitHub.
+
+### `init.sh` — le wizard en 5 étapes
 
 | Étape | Ce qui se passe |
 |---|---|
 | **1. Nom** | Nomme ton projet |
 | **2. Description** | Décris l'idée en 1-2 phrases |
-| **3. Configuration** | Choisis le mode d'autonomie + options |
-| **4. Structure** | Crée `project/` avec son propre git, skills, dossiers research |
-| **5. Brief** | Claude te pose ~22 questions en mode product director et rédige le `BRIEF.md` |
+| **3. Configuration** | Mode d'autonomie + options |
+| **4. Structure** | Crée le workspace avec tout le nécessaire |
+| **5. Brief** | Claude product director pose ~22 questions et rédige le BRIEF.md |
 
-Options :
 ```bash
-./init.sh                # Init complet avec rédaction du brief
-./init.sh --skip-brief   # Init sans brief (le rédiger manuellement)
+./init.sh                          # interactif complet
+./init.sh mon-projet               # avec nom
+./init.sh mon-projet --skip-brief  # sans rédaction assistée du brief
 ```
 
-## Que fait `orchestrator.sh` ?
-
-Pilote Claude en boucle autonome à travers ces phases :
+### `orchestrator.sh` — la boucle autonome
 
 ```
 BRIEF.md (immuable)
@@ -73,136 +99,65 @@ BOOTSTRAP ──▶ RECHERCHE INITIALE ──▶ STRATÉGIE & ROADMAP
                                     Nouvelle itération...
 ```
 
-Chaque phase est un prompt stocké dans `phases/`. Claude peut aussi modifier ses propres instructions (`CLAUDE.md`), créer de nouveaux skills, et faire évoluer la roadmap.
-
 ## Modes d'autonomie
 
 | Mode | Comportement | Quand l'utiliser |
 |---|---|---|
-| **Pilote auto** | 100% autonome, aucune intervention | Projets exploratoires, prototypes |
-| **Copilote** | Claude code, tu valides chaque merge | Projets avec standards de qualité |
+| **Pilote auto** | 100% autonome | Prototypes, exploration |
+| **Copilote** | Claude code, tu valides chaque merge | Projets avec standards qualité |
 | **Supervisé** | Pause toutes les N features | Quand tu veux garder le contrôle |
-
-Configurable dans `config.sh` ou via `init.sh`.
-
-## Structure des fichiers
-
-```
-autonome-agent/                  ← Repo orchestrateur (ce repo)
-├── init.sh                      ← Assistant d'initialisation
-├── orchestrator.sh              ← Script principal
-├── config.sh                    ← Configuration (garde-fous, modes, etc.)
-├── BRIEF.md                     ← Brief produit (généré par init.sh)
-├── BRIEF.template.md            ← Template si rédaction manuelle
-├── ARCHITECTURE.md              ← Documentation détaillée du système
-│
-├── phases/                      ← Prompts de chaque phase
-│   ├── 00-bootstrap.md
-│   ├── 01-research.md
-│   ├── 02-strategy.md
-│   ├── 03-implement.md
-│   ├── 04-test-fix.md
-│   ├── 05-reflect.md
-│   ├── 06-meta-retro.md
-│   └── 07-evolve.md
-│
-├── skills-templates/            ← Skills copiées dans le projet au bootstrap
-│   ├── write-brief.md
-│   ├── implement-feature.md
-│   ├── fix-tests.md
-│   ├── research.md
-│   └── review-own-code.md
-│
-├── logs/                        ← Logs de l'orchestrateur
-│
-└── project/                     ← Repo du projet généré (git séparé)
-    ├── .git/                    ← Son propre historique
-    ├── BRIEF.md                 ← Copie de l'ancre (immuable)
-    ├── CLAUDE.md                ← Auto-généré, auto-amélioré par Claude
-    ├── ROADMAP.md               ← Auto-généré, évolue avec le projet
-    ├── .claude/skills/          ← Auto-générées/améliorées par Claude
-    ├── research/                ← Veille marché
-    ├── logs/                    ← Rétrospectives par feature
-    ├── src/                     ← Code applicatif
-    └── e2e/                     ← Tests Playwright
-```
-
-## Configuration
-
-Tout se règle dans `config.sh` :
-
-```bash
-# Garde-fous
-MAX_FIX_ATTEMPTS=5              # Tentatives de fix par feature (puis abandon)
-MAX_FEATURES=50                 # Arrêt après N features
-MAX_TURNS_PER_INVOCATION=50     # Limite tokens par appel Claude
-
-# Rythme
-EPIC_SIZE=3                     # Features par epic avant veille ciblée
-META_RETRO_FREQUENCY=5          # Méta-rétro toutes les N features
-
-# Intervention humaine
-PAUSE_EVERY_N_FEATURES=0        # 0 = jamais, N = pause toutes les N features
-REQUIRE_HUMAN_APPROVAL=false    # true = valider chaque merge manuellement
-
-# Recherche web
-ENABLE_RESEARCH=true            # Activer la veille marché
-MAX_TURNS_RESEARCH_INITIAL=80   # Budget recherche initiale
-
-# Commandes techniques
-BUILD_COMMAND="npm run build"
-TEST_COMMAND="npx playwright test"
-```
 
 ## Auto-amélioration
 
-L'agent s'améliore au fil du projet :
+L'agent améliore ses propres instructions au fil du projet :
 
-- **CLAUDE.md** — Ajoute des règles quand il découvre des pièges, nettoie aux méta-rétros
-- **Skills** — Crée de nouveaux workflows quand il détecte des patterns répétés
-- **ROADMAP.md** — Ajoute des features découvertes, repriorise après la veille
-- **Recherche** — Veille concurrentielle et tendances intégrée au cycle de dev
+- **CLAUDE.md** — Ajoute des règles quand il découvre des pièges
+- **Skills** — Crée de nouveaux workflows quand un pattern se répète
+- **ROADMAP.md** — Ajoute/repriorise des features après la veille
+- **Recherche** — Veille concurrentielle intégrée au cycle de dev
 
-```
-Feature 1 :  erreurs basiques → ajoute 3 règles au CLAUDE.md
-Feature 3 :  même erreur E2E  → crée un skill fix-e2e.md
-Feature 5 :  méta-rétro       → nettoie CLAUDE.md, affine les skills
-Feature 10 : dette détectée   → ajoute un refactoring à la roadmap
+## Configuration
+
+Tout dans `config.sh` du workspace :
+
+```bash
+MAX_FIX_ATTEMPTS=5              # Tentatives de fix par feature
+MAX_FEATURES=50                 # Arrêt après N features
+EPIC_SIZE=3                     # Features par epic
+META_RETRO_FREQUENCY=5          # Méta-rétro toutes les N features
+PAUSE_EVERY_N_FEATURES=0        # 0 = jamais
+REQUIRE_HUMAN_APPROVAL=false    # Valider chaque merge
+ENABLE_RESEARCH=true            # Veille marché
+BUILD_COMMAND="npm run build"   # Commande build
+TEST_COMMAND="npx playwright test"
 ```
 
 ## Surveiller l'avancement
 
 ```bash
-# Logs en temps réel
-tail -f logs/orchestrator.log
-
-# Compter les features terminées
-grep -c '\[x\]' project/ROADMAP.md
-
-# Voir la roadmap
-cat project/ROADMAP.md
-
-# Voir les rétrospectives
-ls project/logs/
+tail -f logs/orchestrator.log                     # logs temps réel
+grep -c '\[x\]' project/ROADMAP.md                # features terminées
+cat project/ROADMAP.md                            # roadmap
+cat project/logs/retrospective-*.md               # rétrospectives
 ```
 
 ## FAQ
 
-**Le projet project/ est-il dans le même repo git ?**
-Non. `project/` a son propre git indépendant. Le `.gitignore` de l'orchestrateur l'exclut. Tu peux push `project/` vers son propre repo distant.
+**Le workspace est-il un repo git ?**
+Non. Seul `project/` à l'intérieur a son propre git. Le workspace est de l'outillage local.
+
+**Je peux lancer plusieurs projets ?**
+Oui. Chaque `./init.sh nom-projet` crée un workspace indépendant.
 
 **Je peux reprendre après un crash ?**
-Oui. L'orchestrateur détecte un `project/` existant et reprend où il en était (features non cochées dans la ROADMAP).
+Oui. L'orchestrateur détecte un projet existant et reprend (features non cochées dans ROADMAP).
 
-**Combien ça coûte en tokens ?**
-~50-100K tokens par feature complète (veille + impl + tests + reflect). Un projet de 30 features ~= 2-3M tokens.
+**Combien ça coûte ?**
+~50-100K tokens par feature. Un projet de 10 features ~= 500K-1M tokens.
 
-**Je peux modifier le brief en cours de route ?**
-Le BRIEF.md est conçu pour être immuable (c'est l'ancre). Si tu veux changer la direction, modifie plutôt la ROADMAP.md directement.
+**Je peux modifier les prompts ?**
+Oui. Édite les fichiers dans `phases/` du workspace. Chaque phase est un prompt Markdown avec des placeholders `{{VAR}}`.
 
-**Je peux personnaliser les prompts ?**
-Oui, édite les fichiers dans `phases/`. Chaque phase est un prompt Markdown indépendant avec des placeholders `{{VAR}}`.
+## Documentation
 
-## Documentation complète
-
-Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour le détail de chaque phase, les garde-fous, et les limites du système.
+Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour le détail complet de chaque phase.

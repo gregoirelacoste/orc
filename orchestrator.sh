@@ -6,12 +6,10 @@ set -euo pipefail
 # ============================================================
 #
 # Usage :
-#   ./orchestrator.sh              — lance le projet (BRIEF.md requis)
-#   ./orchestrator.sh --brief      — mode interactif : Claude rédige le BRIEF.md
-#   ./orchestrator.sh --brief "description courte du projet"
+#   ./orchestrator.sh    — lance l'agent autonome (BRIEF.md requis)
 #
-# L'orchestrateur crée un dossier project/ avec son propre git,
-# puis pilote Claude en boucle autonome.
+# Ce script doit être lancé depuis un workspace créé par init.sh.
+# Il crée project/ (si pas déjà fait) et pilote Claude en boucle.
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -124,61 +122,12 @@ if ! command -v claude &> /dev/null; then
   exit 1
 fi
 
-# ============================================================
-# MODE --brief : Claude rédige le BRIEF.md en mode interactif
-# ============================================================
-
-if [ "${1:-}" = "--brief" ]; then
-  log PHASE "MODE BRIEF — Claude product director"
-
-  brief_context="${2:-}"
-  brief_skill=$(cat "$SCRIPT_DIR/skills-templates/write-brief.md")
-
-  if [ -n "$brief_context" ]; then
-    brief_prompt="$brief_skill
-
----
-
-L'utilisateur a décrit son projet ainsi :
-\"$brief_context\"
-
-Commence par poser les questions manquantes pour compléter le brief.
-Écris le résultat final dans BRIEF.md."
-  else
-    brief_prompt="$brief_skill
-
----
-
-Commence par demander à l'utilisateur de décrire son idée de projet,
-puis pose toutes les questions du process une par une.
-Écris le résultat final dans BRIEF.md."
-  fi
-
-  # Mode interactif (pas de --yes) pour le dialogue avec l'utilisateur
-  echo -e "${CYAN}Claude va te poser des questions pour rédiger le BRIEF.md.${NC}"
-  echo -e "${CYAN}Réponds à chaque question. Il rédigera le brief à la fin.${NC}"
-  echo ""
-  claude "$brief_prompt" --max-turns 40 -d "$SCRIPT_DIR"
-
-  if [ -f "$SCRIPT_DIR/BRIEF.md" ]; then
-    echo ""
-    echo -e "${GREEN}BRIEF.md rédigé avec succès.${NC}"
-    echo -e "Relis-le : ${CYAN}cat BRIEF.md${NC}"
-    echo -e "Puis lance : ${CYAN}./orchestrator.sh${NC}"
-  else
-    echo -e "${RED}BRIEF.md n'a pas été créé. Relance avec --brief.${NC}"
-  fi
-  exit 0
-fi
-
-# ============================================================
-
 if [ ! -f "$SCRIPT_DIR/BRIEF.md" ]; then
   echo -e "${RED}Erreur : BRIEF.md non trouvé.${NC}"
   echo ""
-  echo "  Deux options :"
-  echo -e "    ${GREEN}1.${NC} Rédaction assistée : ${CYAN}./orchestrator.sh --brief${NC}"
-  echo -e "    ${GREEN}2.${NC} Manuel : ${CYAN}cp BRIEF.template.md BRIEF.md && vim BRIEF.md${NC}"
+  echo "  Ce script doit être lancé depuis un workspace créé par init.sh."
+  echo "  Depuis le repo template, lancez :"
+  echo -e "    ${CYAN}./init.sh mon-projet${NC}"
   exit 1
 fi
 

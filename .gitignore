@@ -1,11 +1,5 @@
-# Projet généré (a son propre git)
-project/
-
-# Logs de l'orchestrateur
-logs/
-
-# Brief personnel (optionnel — décommenter si privé)
-# BRIEF.md
+# Ce repo est un template — rien de spécifique à un projet ici
+# Les workspaces sont créés ailleurs par init.sh
 
 # OS
 .DS_Store
