@@ -192,23 +192,33 @@ log INFO "Recherche : $ENABLE_RESEARCH | Approbation humaine : $REQUIRE_HUMAN_AP
 # PHASE 0 — BOOTSTRAP
 # ============================================================
 
-if [ ! -d "$PROJECT_DIR/.git" ]; then
+if [ ! -f "$PROJECT_DIR/CLAUDE.md" ]; then
   log PHASE "PHASE 0 — BOOTSTRAP"
 
-  mkdir -p "$PROJECT_DIR"
-  cp "$SCRIPT_DIR/BRIEF.md" "$PROJECT_DIR/BRIEF.md"
-  cd "$PROJECT_DIR" && git init && cd - > /dev/null
+  # Créer le git si pas déjà fait (init.sh peut l'avoir fait)
+  if [ ! -d "$PROJECT_DIR/.git" ]; then
+    mkdir -p "$PROJECT_DIR"
+    cd "$PROJECT_DIR" && git init -b main > /dev/null 2>&1 && cd - > /dev/null
+  fi
 
-  # Créer la structure research/
+  # Copier le brief si pas déjà présent
+  if [ ! -f "$PROJECT_DIR/BRIEF.md" ]; then
+    cp "$SCRIPT_DIR/BRIEF.md" "$PROJECT_DIR/BRIEF.md"
+  fi
+
+  # Créer la structure si pas déjà présente (init.sh peut l'avoir fait)
   mkdir -p "$PROJECT_DIR/research/competitors" \
            "$PROJECT_DIR/research/trends" \
            "$PROJECT_DIR/research/user-needs" \
            "$PROJECT_DIR/research/regulations" \
            "$PROJECT_DIR/logs"
 
-  # Copier les skills templates
+  # Copier les skills templates si pas déjà présentes
   mkdir -p "$PROJECT_DIR/.claude/skills"
-  cp "$SCRIPT_DIR/skills-templates/"*.md "$PROJECT_DIR/.claude/skills/"
+  for skill in "$SCRIPT_DIR/skills-templates/"*.md; do
+    dest="$PROJECT_DIR/.claude/skills/$(basename "$skill")"
+    [ ! -f "$dest" ] && cp "$skill" "$dest"
+  done
 
   # Lancer le bootstrap Claude
   local_prompt=$(render_phase "00-bootstrap.md")
@@ -216,7 +226,7 @@ if [ ! -d "$PROJECT_DIR/.git" ]; then
 
   log INFO "Bootstrap terminé."
 else
-  log INFO "Projet existant détecté, reprise en cours..."
+  log INFO "Projet existant détecté (CLAUDE.md présent), reprise en cours..."
 fi
 
 # ============================================================
