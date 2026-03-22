@@ -18,6 +18,9 @@ avant de repartir — le tout en boucle autonome.
 ## Schéma global
 
 ```
+./orchestrator.sh --brief     (optionnel, mode interactif)
+    │
+    ▼
 BRIEF.md (immuable)
     │
     ▼
@@ -67,6 +70,32 @@ BOOTSTRAP ──▶ RECHERCHE INITIALE ──▶ STRATÉGIE & ROADMAP
                     ├── non → nouvelles features proposées → boucle
                     └── oui → DONE.md → fin
 ```
+
+---
+
+## Phase -1 — RÉDACTION DU BRIEF (optionnel)
+
+**Quand :** `./orchestrator.sh --brief` ou `./orchestrator.sh --brief "mon idée"`
+
+**Ce que Claude fait :**
+
+Claude agit en **directeur produit senior**. En mode interactif (pas autonome),
+il pose ~22 questions structurées à l'utilisateur pour couvrir :
+- Vision, problème, anti-scope
+- Persona, parcours utilisateur, device
+- Concurrents (vérifiés par WebSearch), différenciateurs, modèle économique
+- Features MVP avec critères d'acceptance et cas limites
+- Stack technique, APIs, données
+- Design, UX, langue, accessibilité
+- Contraintes (budget, légal, performance)
+- Critères de succès mesurables
+
+Puis rédige un `BRIEF.md` exhaustif et sans ambiguïté.
+
+**Pourquoi c'est critique :** le BRIEF est la seule ancre immuable du système.
+Chaque ambiguïté dans le brief = une décision arbitraire de l'IA plus tard.
+
+**Skill :** `skills-templates/write-brief.md`
 
 ---
 
@@ -331,17 +360,27 @@ project/
 ## Lancement
 
 ```bash
-# 1. Préparer
-mkdir -p project
-# Écrire BRIEF.md avec la vision du projet
-cd project && git init && cd ..
+# Cloner le repo orchestrateur
+git clone git@github.com:gregoirelacoste/autonome-agent.git mon-projet
+cd mon-projet
 
-# 2. Lancer
-chmod +x orchestrator.sh
-nohup ./orchestrator.sh > orchestrator.log 2>&1 &
+# Option A : Brief assisté par Claude (recommandé)
+./orchestrator.sh --brief
+# ou avec une idée de départ :
+./orchestrator.sh --brief "un comparateur d'assurances auto pour les jeunes conducteurs"
 
-# 3. Surveiller
-tail -f orchestrator.log
+# Option B : Brief manuel
+cp BRIEF.template.md BRIEF.md
+vim BRIEF.md
+
+# Ajuster la config si besoin
+vim config.sh
+
+# Lancer l'agent autonome
+nohup ./orchestrator.sh > logs/orchestrator.log 2>&1 &
+
+# Surveiller
+tail -f logs/orchestrator.log
 watch -n 30 'grep -c "\[x\]" project/ROADMAP.md'
 ```
 
@@ -359,10 +398,3 @@ watch -n 30 'grep -c "\[x\]" project/ROADMAP.md'
   faire de user testing ni observer de vrais utilisateurs.
 - **Coût** : chaque feature complète (veille + impl + tests + reflect)
   consomme environ 50-100K tokens. Un projet de 30 features ~= 2-3M tokens.
-
----
-
-## Prochaine étape
-
-Écrire `orchestrator.sh` — le script bash qui orchestre tout le flow.
-Puis écrire un `BRIEF.md` pour un projet concret et lancer.
