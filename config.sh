@@ -6,11 +6,11 @@
 
 # === PROJET ===
 PROJECT_DIR="./project"                  # Dossier du projet généré
-PROJECT_NAME=""                          # Nom du projet (auto-détecté depuis BRIEF.md si vide)
+PROJECT_NAME="pc-builder"                # Nom du projet
 
 # === GARDE-FOUS ===
 MAX_FIX_ATTEMPTS=5                       # Tentatives de correction par feature
-MAX_FEATURES=50                          # Nombre total de features avant arrêt
+MAX_FEATURES=10                          # Nombre total de features avant arrêt
 MAX_TURNS_PER_INVOCATION=50              # Limite de turns par appel Claude
 
 # === RYTHME ===
