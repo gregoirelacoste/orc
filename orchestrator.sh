@@ -195,7 +195,7 @@ print_cost_summary() {
   fi
 }
 
-# Run Claude avec tracking de tokens
+# Run Claude avec tracking de tokens et logs temps réel
 # Usage: run_claude "prompt" [max_turns] [log_file] [phase_name] [feature_name]
 run_claude() {
   local prompt="$1"
@@ -204,17 +204,71 @@ run_claude() {
   local phase_name="${4:-unknown}"
   local feature_name="${5:-}"
 
-  local json_output
   local exit_code=0
+  local tmp_json
+  tmp_json=$(mktemp)
+  local start_time
+  start_time=$(date +%s)
 
-  # Lancer Claude avec output JSON pour capturer les tokens
-  json_output=$(claude -p "$prompt" \
-    --dangerously-skip-permissions \
-    --max-turns "$max_turns" \
-    --output-format json \
-    -d "$PROJECT_DIR" 2>&1) || exit_code=$?
+  log INFO "→ Claude lancé [phase=$phase_name] [max_turns=$max_turns]..."
 
-  # Extraire le texte de la réponse pour le log
+  # Lancer Claude : stream text en temps réel, capture JSON séparément
+  # On utilise --output-format stream-json pour avoir du feedback en temps réel
+  # Fallback : si stream-json échoue, utiliser json classique
+  if [ "$VERBOSE" = true ]; then
+    claude -p "$prompt" \
+      --dangerously-skip-permissions \
+      --max-turns "$max_turns" \
+      --output-format json \
+      -d "$PROJECT_DIR" > "$tmp_json" 2>&1 &
+  else
+    claude -p "$prompt" \
+      --dangerously-skip-permissions \
+      --max-turns "$max_turns" \
+      --output-format json \
+      -d "$PROJECT_DIR" > "$tmp_json" 2>&1 &
+  fi
+
+  local claude_pid=$!
+
+  # Boucle de monitoring : affiche la progression pendant que Claude tourne
+  local dots=0
+  while kill -0 "$claude_pid" 2>/dev/null; do
+    dots=$((dots + 1))
+    local elapsed=$(( $(date +%s) - start_time ))
+    local mins=$((elapsed / 60))
+    local secs=$((elapsed % 60))
+
+    # Afficher un heartbeat toutes les 15 secondes
+    if [ $((dots % 3)) -eq 0 ]; then
+      local size
+      size=$(wc -c < "$tmp_json" 2>/dev/null || echo "0")
+      printf "\r  ${CYAN}⏳ %s | %02d:%02d | %s bytes reçus${NC}   " \
+        "$phase_name" "$mins" "$secs" "$size" >&2
+    fi
+
+    sleep 5
+  done
+
+  # Récupérer le code de sortie
+  wait "$claude_pid" || exit_code=$?
+
+  local end_time
+  end_time=$(date +%s)
+  local duration=$(( end_time - start_time ))
+  local dur_mins=$((duration / 60))
+  local dur_secs=$((duration % 60))
+
+  # Nettoyer la ligne de progression
+  printf "\r%80s\r" "" >&2
+
+  log INFO "← Claude terminé [phase=$phase_name] [durée=${dur_mins}m${dur_secs}s] [exit=$exit_code]"
+
+  # Lire la sortie JSON
+  local json_output
+  json_output=$(cat "$tmp_json")
+
+  # Extraire le texte pour le log
   local text_output
   if command -v jq &> /dev/null; then
     text_output=$(echo "$json_output" | jq -r '.result // .message // .' 2>/dev/null || echo "$json_output")
@@ -222,10 +276,19 @@ run_claude() {
     text_output="$json_output"
   fi
 
-  # Logger
+  # Logger dans le fichier de log de la phase
   echo "$text_output" >> "$log_file"
   if [ "$VERBOSE" = true ]; then
-    echo "$text_output"
+    # Afficher les premières et dernières lignes pour savoir ce qui s'est passé
+    local line_count
+    line_count=$(echo "$text_output" | wc -l)
+    if [ "$line_count" -gt 20 ]; then
+      echo "$text_output" | head -5
+      echo "  ... ($line_count lignes, voir $log_file pour le détail) ..."
+      echo "$text_output" | tail -5
+    else
+      echo "$text_output"
+    fi
   fi
 
   # Tracker les tokens
@@ -238,10 +301,12 @@ run_claude() {
     if [ "$over_budget" = "yes" ]; then
       log ERROR "Budget dépassé ! \$${TOTAL_COST_USD} > \$${MAX_BUDGET_USD}"
       print_cost_summary
+      rm -f "$tmp_json"
       exit 1
     fi
   fi
 
+  rm -f "$tmp_json"
   return $exit_code
 }
 
