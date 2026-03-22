@@ -49,9 +49,9 @@ run_claude() {
   local log_file="${3:-/dev/null}"
 
   if [ "$VERBOSE" = true ]; then
-    claude -p "$prompt" --yes --max-turns "$max_turns" -d "$PROJECT_DIR" 2>&1 | tee -a "$log_file"
+    claude -p "$prompt" --dangerously-skip-permissions --max-turns "$max_turns" -d "$PROJECT_DIR" 2>&1 | tee -a "$log_file"
   else
-    claude -p "$prompt" --yes --max-turns "$max_turns" -d "$PROJECT_DIR" 2>&1 >> "$log_file"
+    claude -p "$prompt" --dangerously-skip-permissions --max-turns "$max_turns" -d "$PROJECT_DIR" 2>&1 >> "$log_file"
   fi
 }
 
