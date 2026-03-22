@@ -34,6 +34,9 @@ TEST_COMMAND="npx playwright test"       # Commande de test
 DEV_COMMAND="npm run dev"                # Commande serveur dev
 LINT_COMMAND="npm run lint"              # Commande lint (vide = désactivé)
 
+# === BUDGET ===
+MAX_BUDGET_USD=""                        # Budget max en USD (vide = illimité). Ex: "5.00"
+
 # === LOGS ===
 LOG_DIR="./logs"                         # Dossier des logs orchestrateur
 VERBOSE=true                             # Logs détaillés dans la console

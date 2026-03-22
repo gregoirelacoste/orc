@@ -28,6 +28,16 @@ FEATURE_COUNT=0
 EPIC_FEATURE_COUNT=0
 TOTAL_FAILURES=0
 
+# === TRACKING TOKENS ===
+TOKENS_FILE="$SCRIPT_DIR/logs/tokens.json"
+TOTAL_INPUT_TOKENS=0
+TOTAL_OUTPUT_TOKENS=0
+TOTAL_COST_USD=0
+
+# Coût par token (Claude Opus 4, en USD) — ajuster selon le modèle
+COST_PER_INPUT_TOKEN=0.000015
+COST_PER_OUTPUT_TOKEN=0.000075
+
 # === FONCTIONS UTILITAIRES ===
 
 log() {
@@ -39,20 +49,200 @@ log() {
     WARN)  echo -e "${CYAN}[$timestamp]${NC} ${YELLOW}[WARN]${NC}  $msg" ;;
     ERROR) echo -e "${CYAN}[$timestamp]${NC} ${RED}[ERROR]${NC} $msg" ;;
     PHASE) echo -e "\n${CYAN}[$timestamp]${NC} ${BLUE}[═══════════════]${NC} $msg" ;;
+    COST)  echo -e "${CYAN}[$timestamp]${NC} ${YELLOW}[\$]${NC}     $msg" ;;
   esac
   echo "[$timestamp] [$level] $msg" >> "$LOG_DIR/orchestrator.log"
 }
 
+# Initialise le fichier de tracking tokens
+init_tokens() {
+  if [ ! -f "$TOKENS_FILE" ]; then
+    cat > "$TOKENS_FILE" << 'JSONEOF'
+{
+  "total_input_tokens": 0,
+  "total_output_tokens": 0,
+  "total_cost_usd": 0,
+  "invocations": 0,
+  "by_phase": {},
+  "by_feature": {},
+  "history": []
+}
+JSONEOF
+  fi
+
+  # Charger les totaux existants (reprise après crash)
+  if command -v jq &> /dev/null && [ -f "$TOKENS_FILE" ]; then
+    TOTAL_INPUT_TOKENS=$(jq -r '.total_input_tokens // 0' "$TOKENS_FILE")
+    TOTAL_OUTPUT_TOKENS=$(jq -r '.total_output_tokens // 0' "$TOKENS_FILE")
+    TOTAL_COST_USD=$(jq -r '.total_cost_usd // 0' "$TOKENS_FILE")
+  fi
+}
+
+# Parse la sortie JSON de Claude et extrait les tokens
+# Usage: track_tokens "phase_name" "feature_name" "$json_output"
+track_tokens() {
+  local phase="$1"
+  local feature="${2:-}"
+  local json_output="$3"
+
+  # Pas de jq = pas de tracking
+  if ! command -v jq &> /dev/null; then
+    return 0
+  fi
+
+  # Extraire les tokens depuis la sortie JSON
+  local input_tokens output_tokens
+  input_tokens=$(echo "$json_output" | jq -r '.usage.input_tokens // 0' 2>/dev/null || echo "0")
+  output_tokens=$(echo "$json_output" | jq -r '.usage.output_tokens // 0' 2>/dev/null || echo "0")
+
+  # Si pas de données d'usage, tenter le format alternatif
+  if [ "$input_tokens" = "0" ] && [ "$output_tokens" = "0" ]; then
+    input_tokens=$(echo "$json_output" | jq -r '.result.usage.input_tokens // 0' 2>/dev/null || echo "0")
+    output_tokens=$(echo "$json_output" | jq -r '.result.usage.output_tokens // 0' 2>/dev/null || echo "0")
+  fi
+
+  [ "$input_tokens" = "null" ] && input_tokens=0
+  [ "$output_tokens" = "null" ] && output_tokens=0
+
+  if [ "$input_tokens" -eq 0 ] && [ "$output_tokens" -eq 0 ]; then
+    return 0
+  fi
+
+  # Calculer le coût
+  local cost
+  cost=$(echo "$input_tokens $output_tokens $COST_PER_INPUT_TOKEN $COST_PER_OUTPUT_TOKEN" | \
+    awk '{printf "%.4f", $1 * $3 + $2 * $4}')
+
+  # Accumuler
+  TOTAL_INPUT_TOKENS=$((TOTAL_INPUT_TOKENS + input_tokens))
+  TOTAL_OUTPUT_TOKENS=$((TOTAL_OUTPUT_TOKENS + output_tokens))
+  TOTAL_COST_USD=$(echo "$TOTAL_COST_USD $cost" | awk '{printf "%.4f", $1 + $2}')
+
+  # Mettre à jour le fichier JSON
+  local timestamp
+  timestamp=$(date -Iseconds)
+
+  jq \
+    --argjson input "$input_tokens" \
+    --argjson output "$output_tokens" \
+    --argjson cost "$cost" \
+    --argjson total_in "$TOTAL_INPUT_TOKENS" \
+    --argjson total_out "$TOTAL_OUTPUT_TOKENS" \
+    --argjson total_cost "$TOTAL_COST_USD" \
+    --arg phase "$phase" \
+    --arg feature "$feature" \
+    --arg ts "$timestamp" \
+    '
+    .total_input_tokens = $total_in |
+    .total_output_tokens = $total_out |
+    .total_cost_usd = $total_cost |
+    .invocations += 1 |
+    .by_phase[$phase].input_tokens = ((.by_phase[$phase].input_tokens // 0) + $input) |
+    .by_phase[$phase].output_tokens = ((.by_phase[$phase].output_tokens // 0) + $output) |
+    .by_phase[$phase].cost_usd = ((.by_phase[$phase].cost_usd // 0) + $cost) |
+    .by_phase[$phase].calls = ((.by_phase[$phase].calls // 0) + 1) |
+    (if $feature != "" then
+      .by_feature[$feature].input_tokens = ((.by_feature[$feature].input_tokens // 0) + $input) |
+      .by_feature[$feature].output_tokens = ((.by_feature[$feature].output_tokens // 0) + $output) |
+      .by_feature[$feature].cost_usd = ((.by_feature[$feature].cost_usd // 0) + $cost)
+    else . end) |
+    .history += [{
+      "timestamp": $ts,
+      "phase": $phase,
+      "feature": $feature,
+      "input_tokens": $input,
+      "output_tokens": $output,
+      "cost_usd": $cost
+    }]
+    ' "$TOKENS_FILE" > "${TOKENS_FILE}.tmp" && mv "${TOKENS_FILE}.tmp" "$TOKENS_FILE"
+
+  log COST "tokens: +${input_tokens}in/+${output_tokens}out (\$${cost}) | Total: \$${TOTAL_COST_USD}"
+}
+
+# Affiche un résumé des coûts
+print_cost_summary() {
+  if ! command -v jq &> /dev/null || [ ! -f "$TOKENS_FILE" ]; then
+    return 0
+  fi
+
+  local invocations total_in total_out total_cost
+  invocations=$(jq -r '.invocations' "$TOKENS_FILE")
+  total_in=$(jq -r '.total_input_tokens' "$TOKENS_FILE")
+  total_out=$(jq -r '.total_output_tokens' "$TOKENS_FILE")
+  total_cost=$(jq -r '.total_cost_usd' "$TOKENS_FILE")
+
+  echo ""
+  echo -e "${YELLOW}═══════════════════════════════════════════════════${NC}"
+  echo -e "${YELLOW}  CONSOMMATION TOKENS${NC}"
+  echo -e "${YELLOW}═══════════════════════════════════════════════════${NC}"
+  echo -e "  Invocations Claude :  $invocations"
+  echo -e "  Tokens input :        $total_in"
+  echo -e "  Tokens output :       $total_out"
+  echo -e "  Tokens total :        $((total_in + total_out))"
+  echo -e "  ${YELLOW}Coût estimé :       \$${total_cost} USD${NC}"
+  echo ""
+
+  # Top 3 phases les plus coûteuses
+  echo -e "  ${CYAN}Par phase :${NC}"
+  jq -r '.by_phase | to_entries | sort_by(-.value.cost_usd) | .[:5][] | "    \(.key): $\(.value.cost_usd) (\(.value.calls) appels)"' "$TOKENS_FILE" 2>/dev/null || true
+  echo ""
+
+  # Top 3 features les plus coûteuses
+  if jq -e '.by_feature | length > 0' "$TOKENS_FILE" > /dev/null 2>&1; then
+    echo -e "  ${CYAN}Par feature :${NC}"
+    jq -r '.by_feature | to_entries | sort_by(-.value.cost_usd) | .[:5][] | "    \(.key): $\(.value.cost_usd)"' "$TOKENS_FILE" 2>/dev/null || true
+    echo ""
+  fi
+}
+
+# Run Claude avec tracking de tokens
+# Usage: run_claude "prompt" [max_turns] [log_file] [phase_name] [feature_name]
 run_claude() {
   local prompt="$1"
   local max_turns="${2:-$MAX_TURNS_PER_INVOCATION}"
   local log_file="${3:-/dev/null}"
+  local phase_name="${4:-unknown}"
+  local feature_name="${5:-}"
 
-  if [ "$VERBOSE" = true ]; then
-    claude -p "$prompt" --dangerously-skip-permissions --max-turns "$max_turns" -d "$PROJECT_DIR" 2>&1 | tee -a "$log_file"
+  local json_output
+  local exit_code=0
+
+  # Lancer Claude avec output JSON pour capturer les tokens
+  json_output=$(claude -p "$prompt" \
+    --dangerously-skip-permissions \
+    --max-turns "$max_turns" \
+    --output-format json \
+    -d "$PROJECT_DIR" 2>&1) || exit_code=$?
+
+  # Extraire le texte de la réponse pour le log
+  local text_output
+  if command -v jq &> /dev/null; then
+    text_output=$(echo "$json_output" | jq -r '.result // .message // .' 2>/dev/null || echo "$json_output")
   else
-    claude -p "$prompt" --dangerously-skip-permissions --max-turns "$max_turns" -d "$PROJECT_DIR" 2>&1 >> "$log_file"
+    text_output="$json_output"
   fi
+
+  # Logger
+  echo "$text_output" >> "$log_file"
+  if [ "$VERBOSE" = true ]; then
+    echo "$text_output"
+  fi
+
+  # Tracker les tokens
+  track_tokens "$phase_name" "$feature_name" "$json_output"
+
+  # Vérifier le budget max
+  if [ -n "${MAX_BUDGET_USD:-}" ] && command -v awk &> /dev/null; then
+    local over_budget
+    over_budget=$(echo "$TOTAL_COST_USD $MAX_BUDGET_USD" | awk '{print ($1 > $2) ? "yes" : "no"}')
+    if [ "$over_budget" = "yes" ]; then
+      log ERROR "Budget dépassé ! \$${TOTAL_COST_USD} > \$${MAX_BUDGET_USD}"
+      print_cost_summary
+      exit 1
+    fi
+  fi
+
+  return $exit_code
 }
 
 # Remplace les placeholders {{VAR}} dans un fichier phase
@@ -62,7 +252,6 @@ render_phase() {
   local content
   content=$(cat "$SCRIPT_DIR/phases/$phase_file")
 
-  # Remplace chaque paire clé=valeur passée en argument
   while [ $# -gt 0 ]; do
     local key="${1%%=*}"
     local value="${1#*=}"
@@ -92,12 +281,14 @@ human_pause() {
   echo -e "${YELLOW}  PAUSE — Intervention humaine requise${NC}"
   echo -e "${YELLOW}  Raison : $reason${NC}"
   echo -e "${YELLOW}  Features complétées : $FEATURE_COUNT${NC}"
+  echo -e "${YELLOW}  Coût actuel : \$${TOTAL_COST_USD} USD${NC}"
   echo -e "${YELLOW}═══════════════════════════════════════════════════${NC}"
   echo ""
   echo -e "  Commandes :"
   echo -e "    ${GREEN}c${NC} — continuer"
   echo -e "    ${GREEN}r${NC} — voir la roadmap"
   echo -e "    ${GREEN}l${NC} — voir les logs récents"
+  echo -e "    ${GREEN}t${NC} — voir les tokens consommés"
   echo -e "    ${GREEN}q${NC} — quitter"
   echo ""
 
@@ -105,10 +296,11 @@ human_pause() {
     read -rp "→ " choice
     case "$choice" in
       c|C) return 0 ;;
-      r|R) cat "$PROJECT_DIR/ROADMAP.md" 2>/dev/null || echo "Pas de ROADMAP encore." ; echo "" ;;
+      r|R) cat "$PROJECT_DIR/ROADMAP.md" 2>/dev/null || echo "Pas de ROADMAP." ; echo "" ;;
       l|L) tail -30 "$LOG_DIR/orchestrator.log" 2>/dev/null ; echo "" ;;
-      q|Q) log INFO "Arrêt demandé par l'utilisateur." ; exit 0 ;;
-      *) echo "Choix invalide. Tapez c, r, l ou q." ;;
+      t|T) print_cost_summary ;;
+      q|Q) log INFO "Arrêt demandé par l'utilisateur." ; print_cost_summary ; exit 0 ;;
+      *) echo "Choix invalide." ;;
     esac
   done
 }
@@ -118,8 +310,13 @@ human_pause() {
 # ============================================================
 
 if ! command -v claude &> /dev/null; then
-  echo -e "${RED}Erreur : 'claude' CLI non trouvé. Installez Claude Code.${NC}"
+  echo -e "${RED}Erreur : 'claude' CLI non trouvé.${NC}"
   exit 1
+fi
+
+if ! command -v jq &> /dev/null; then
+  echo -e "${YELLOW}⚠ jq non trouvé — le tracking de tokens sera désactivé.${NC}"
+  echo -e "  Installer : ${CYAN}sudo apt install jq${NC}"
 fi
 
 if [ ! -f "$SCRIPT_DIR/BRIEF.md" ]; then
@@ -132,10 +329,17 @@ if [ ! -f "$SCRIPT_DIR/BRIEF.md" ]; then
 fi
 
 mkdir -p "$LOG_DIR"
+init_tokens
 
 log PHASE "DÉMARRAGE DE L'AGENT AUTONOME"
 log INFO "Config : MAX_FEATURES=$MAX_FEATURES | MAX_FIX=$MAX_FIX_ATTEMPTS | EPIC_SIZE=$EPIC_SIZE"
 log INFO "Recherche : $ENABLE_RESEARCH | Approbation humaine : $REQUIRE_HUMAN_APPROVAL"
+if [ -n "${MAX_BUDGET_USD:-}" ]; then
+  log INFO "Budget max : \$${MAX_BUDGET_USD} USD"
+fi
+if [ "$TOTAL_COST_USD" != "0" ]; then
+  log INFO "Reprise — coût cumulé : \$${TOTAL_COST_USD} USD"
+fi
 
 # ============================================================
 # PHASE 0 — BOOTSTRAP
@@ -144,34 +348,29 @@ log INFO "Recherche : $ENABLE_RESEARCH | Approbation humaine : $REQUIRE_HUMAN_AP
 if [ ! -f "$PROJECT_DIR/CLAUDE.md" ]; then
   log PHASE "PHASE 0 — BOOTSTRAP"
 
-  # Créer le git si pas déjà fait (init.sh peut l'avoir fait)
   if [ ! -d "$PROJECT_DIR/.git" ]; then
     mkdir -p "$PROJECT_DIR"
     cd "$PROJECT_DIR" && git init -b main > /dev/null 2>&1 && cd - > /dev/null
   fi
 
-  # Copier le brief si pas déjà présent
   if [ ! -f "$PROJECT_DIR/BRIEF.md" ]; then
     cp "$SCRIPT_DIR/BRIEF.md" "$PROJECT_DIR/BRIEF.md"
   fi
 
-  # Créer la structure si pas déjà présente (init.sh peut l'avoir fait)
   mkdir -p "$PROJECT_DIR/research/competitors" \
            "$PROJECT_DIR/research/trends" \
            "$PROJECT_DIR/research/user-needs" \
            "$PROJECT_DIR/research/regulations" \
            "$PROJECT_DIR/logs"
 
-  # Copier les skills templates si pas déjà présentes
   mkdir -p "$PROJECT_DIR/.claude/skills"
   for skill in "$SCRIPT_DIR/skills-templates/"*.md; do
     dest="$PROJECT_DIR/.claude/skills/$(basename "$skill")"
     [ ! -f "$dest" ] && cp "$skill" "$dest"
   done
 
-  # Lancer le bootstrap Claude
   local_prompt=$(render_phase "00-bootstrap.md")
-  run_claude "$local_prompt" 60 "$LOG_DIR/00-bootstrap.log"
+  run_claude "$local_prompt" 60 "$LOG_DIR/00-bootstrap.log" "bootstrap"
 
   log INFO "Bootstrap terminé."
 else
@@ -186,7 +385,7 @@ if [ "$ENABLE_RESEARCH" = true ] && [ ! -f "$PROJECT_DIR/research/INDEX.md" ]; t
   log PHASE "PHASE 1 — RECHERCHE INITIALE"
 
   local_prompt=$(render_phase "01-research.md")
-  run_claude "$local_prompt" "$MAX_TURNS_RESEARCH_INITIAL" "$LOG_DIR/01-research.log"
+  run_claude "$local_prompt" "$MAX_TURNS_RESEARCH_INITIAL" "$LOG_DIR/01-research.log" "research-initial"
 
   log INFO "Recherche initiale terminée."
 fi
@@ -195,12 +394,11 @@ fi
 # PHASE 2 — STRATÉGIE
 # ============================================================
 
-# Vérifie s'il y a déjà des features dans la ROADMAP
 if ! grep -q '^\- \[ \]' "$PROJECT_DIR/ROADMAP.md" 2>/dev/null; then
   log PHASE "PHASE 2 — STRATÉGIE"
 
   local_prompt=$(render_phase "02-strategy.md")
-  run_claude "$local_prompt" 30 "$LOG_DIR/02-strategy.log"
+  run_claude "$local_prompt" 30 "$LOG_DIR/02-strategy.log" "strategy"
 
   log INFO "Roadmap générée."
 fi
@@ -213,7 +411,6 @@ log PHASE "PHASE 3 — BOUCLE DE DÉVELOPPEMENT"
 
 while [ $FEATURE_COUNT -lt $MAX_FEATURES ]; do
 
-  # --- Lire la prochaine feature ---
   feature_raw=$(next_feature)
 
   if [ -z "$feature_raw" ]; then
@@ -240,7 +437,7 @@ VEILLE CIBLÉE avant la feature : $feature_name
 3. APIs ou données publiques exploitables
 4. Mets à jour research/ et ajuste les specs dans ROADMAP.md si nécessaire
 EOF
-    )" "$MAX_TURNS_RESEARCH_EPIC" "$LOG_DIR/research-epic-$FEATURE_COUNT.log"
+    )" "$MAX_TURNS_RESEARCH_EPIC" "$LOG_DIR/research-epic-$FEATURE_COUNT.log" "research-epic" "$feature_name"
   fi
 
   # --- Implémentation ---
@@ -248,7 +445,7 @@ EOF
   impl_prompt=$(render_phase "03-implement.md" \
     "FEATURE_NAME=$feature_name" \
     "FEATURE_BRANCH=$feature_branch")
-  run_claude "$impl_prompt" "$MAX_TURNS_PER_INVOCATION" "$LOG_DIR/feature-$FEATURE_COUNT-impl.log"
+  run_claude "$impl_prompt" "$MAX_TURNS_PER_INVOCATION" "$LOG_DIR/feature-$FEATURE_COUNT-impl.log" "implement" "$feature_name"
 
   # --- Test & Fix Loop ---
   attempt=0
@@ -279,7 +476,7 @@ EOF
         "BUILD_OUTPUT=${BUILD_OUTPUT: -3000}" \
         "TEST_EXIT=$TEST_EXIT" \
         "TEST_OUTPUT=${TEST_OUTPUT: -3000}")
-      run_claude "$fix_prompt" 30 "$LOG_DIR/feature-$FEATURE_COUNT-fix-$attempt.log"
+      run_claude "$fix_prompt" 30 "$LOG_DIR/feature-$FEATURE_COUNT-fix-$attempt.log" "fix" "$feature_name"
     fi
   done
 
@@ -295,7 +492,7 @@ EOF
     "TESTS_PASSED=$tests_passed" \
     "FIX_ATTEMPTS=$attempt" \
     "N=$FEATURE_COUNT")
-  run_claude "$reflect_prompt" 20 "$LOG_DIR/feature-$FEATURE_COUNT-reflect.log"
+  run_claude "$reflect_prompt" 20 "$LOG_DIR/feature-$FEATURE_COUNT-reflect.log" "reflect" "$feature_name"
 
   # --- Merge si OK ---
   if [ "$tests_passed" = true ]; then
@@ -322,7 +519,7 @@ EOF
   if [ $((FEATURE_COUNT % META_RETRO_FREQUENCY)) -eq 0 ]; then
     log PHASE "MÉTA-RÉTROSPECTIVE — $FEATURE_COUNT features"
     retro_prompt=$(render_phase "06-meta-retro.md" "FEATURE_COUNT=$FEATURE_COUNT")
-    run_claude "$retro_prompt" "$MAX_TURNS_RESEARCH_TREND" "$LOG_DIR/meta-retro-$FEATURE_COUNT.log"
+    run_claude "$retro_prompt" "$MAX_TURNS_RESEARCH_TREND" "$LOG_DIR/meta-retro-$FEATURE_COUNT.log" "meta-retro"
     log INFO "Méta-rétrospective terminée."
   fi
 
@@ -340,13 +537,70 @@ done
 if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
   log PHASE "PHASE FINALE — ÉVOLUTION"
   evolve_prompt=$(render_phase "07-evolve.md")
-  run_claude "$evolve_prompt" 30 "$LOG_DIR/07-evolve.log"
+  run_claude "$evolve_prompt" 30 "$LOG_DIR/07-evolve.log" "evolve"
 
-  # Si Claude a ajouté de nouvelles features et pas déclaré DONE, relancer
   if [ ! -f "$PROJECT_DIR/DONE.md" ] && grep -q '^\- \[ \]' "$PROJECT_DIR/ROADMAP.md" 2>/dev/null; then
     log INFO "Nouvelles features ajoutées — relancement de la boucle."
-    exec "$0"  # Relance l'orchestrateur
+    exec "$0"
   fi
+fi
+
+# ============================================================
+# PHASE POST-PROJET — AUTO-AMÉLIORATION DE L'ORCHESTRATEUR
+# ============================================================
+
+if [ -n "${TEMPLATE_DIR:-}" ] && [ -d "$TEMPLATE_DIR/phases" ]; then
+  log PHASE "AUTO-AMÉLIORATION DE L'ORCHESTRATEUR"
+
+  run_claude "$(cat <<'IMPROVE'
+PHASE AUTO-AMÉLIORATION DE L'ORCHESTRATEUR
+
+Le projet est terminé. Analyse l'ensemble des logs pour améliorer
+l'orchestrateur lui-même (pas le projet, l'OUTIL qui pilote les projets).
+
+Lis :
+1. Tous les fichiers logs/retrospective-*.md
+2. Tous les fichiers logs/meta-retrospective-*.md
+3. Le CLAUDE.md final (les règles que tu t'es auto-ajoutées)
+4. Les skills dans .claude/skills/ (celles que tu as créées)
+
+Analyse :
+- Quels prompts de phase ont produit les meilleurs résultats ?
+- Quels prompts ont dû être "contournés" ou étaient insuffisants ?
+- Quels types d'erreurs l'orchestrateur n'a pas su gérer ?
+- Quelles étapes manquent dans le workflow ?
+- Les garde-fous étaient-ils bien calibrés ?
+
+Produis un fichier `orchestrator-improvements.md` dans le dossier courant
+avec cette structure :
+
+## Améliorations proposées pour l'orchestrateur
+
+### Phases à modifier
+Pour chaque phase concernée :
+- **Phase XX** : [problème constaté] → [amélioration proposée]
+  ```markdown
+  [nouveau contenu suggéré pour le prompt, ou diff]
+  ```
+
+### Nouvelles phases à ajouter
+- [description de la phase] — [pourquoi elle manquait]
+
+### Config à ajuster
+- [paramètre] : [valeur actuelle] → [valeur recommandée] — [pourquoi]
+
+### Nouvelles skills utiles
+- [nom du skill] — [ce qu'il fait] — [pourquoi il serait utile pour les futurs projets]
+
+### Garde-fous
+- [garde-fou à ajouter/modifier] — [incident qui l'a motivé]
+
+Sois concret et actionnable. Chaque suggestion doit pouvoir être
+appliquée directement au repo template de l'orchestrateur.
+IMPROVE
+  )" 30 "$LOG_DIR/orchestrator-improvements.log" "self-improve"
+
+  log INFO "Suggestions d'amélioration écrites dans project/orchestrator-improvements.md"
 fi
 
 # ============================================================
@@ -363,10 +617,17 @@ else
   log WARN "L'orchestrateur s'est arrêté (limite MAX_FEATURES=$MAX_FEATURES atteinte)."
 fi
 
+print_cost_summary
+
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  Agent terminé.${NC}"
 echo -e "${GREEN}  Features : $FEATURE_COUNT | Échecs : $TOTAL_FAILURES${NC}"
+echo -e "${GREEN}  Coût total : \$${TOTAL_COST_USD} USD${NC}"
 echo -e "${GREEN}  Logs : $LOG_DIR/${NC}"
+echo -e "${GREEN}  Tokens : $TOKENS_FILE${NC}"
 echo -e "${GREEN}  Projet : $PROJECT_DIR/${NC}"
+if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
+  echo -e "${GREEN}  Améliorations : $PROJECT_DIR/orchestrator-improvements.md${NC}"
+fi
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
