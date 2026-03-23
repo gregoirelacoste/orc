@@ -1,5 +1,8 @@
 # Ce repo est un template — rien de spécifique à un projet ici
-# Les workspaces sont créés ailleurs par init.sh
+# Les workspaces sont créés ailleurs par init.sh ou agent.sh
+
+# API keys
+.env
 
 # OS
 .DS_Store
