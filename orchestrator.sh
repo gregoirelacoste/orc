@@ -252,11 +252,19 @@ run_claude() {
 
   log INFO "→ Claude lancé [phase=$phase_name] [max_turns=$max_turns]..."
 
-  # Lancer Claude en background avec output JSON
-  claude -p "$prompt" \
+  # Préfixe : forcer Claude à rester dans le répertoire projet
+  local full_prompt="IMPORTANT: Tu travailles dans le répertoire courant ($(basename "$PROJECT_DIR")/). Tous les fichiers que tu crées ou modifies doivent être dans ce répertoire. Ne navigue JAMAIS vers un répertoire parent (..) et n'utilise PAS de chemins absolus vers des dossiers parents.
+
+$prompt"
+
+  # Lancer Claude en background avec output stream-JSON (JSONL)
+  # stream-json produit des événements au fil de l'eau → le watchdog
+  # peut détecter les vrais stalls (contrairement à json qui bufferise tout)
+  claude -p "$full_prompt" \
     --dangerously-skip-permissions \
     --max-turns "$max_turns" \
-    --output-format json \
+    --output-format stream-json \
+    --verbose \
     -d "$PROJECT_DIR" > "$TMP_JSON" 2>&1 &
 
   CLAUDE_PID=$!
@@ -321,14 +329,15 @@ run_claude() {
 
   log INFO "← Claude terminé [phase=$phase_name] [durée=${dur_mins}m${dur_secs}s] [exit=$exit_code]"
 
+  # stream-json : extraire la ligne "result" finale (même structure que json)
   local json_output
-  json_output=$(cat "$TMP_JSON")
+  json_output=$(grep '^{.*"type":"result"' "$TMP_JSON" | tail -1 2>/dev/null || echo "{}")
 
   local text_output
   if command -v jq &> /dev/null; then
-    text_output=$(echo "$json_output" | jq -r '.result // .message // .' 2>/dev/null || echo "$json_output")
+    text_output=$(echo "$json_output" | jq -r '.result // .message // .' 2>/dev/null || cat "$TMP_JSON")
   else
-    text_output="$json_output"
+    text_output=$(cat "$TMP_JSON")
   fi
 
   echo "$text_output" >> "$log_file"
@@ -624,7 +633,9 @@ VEILLE CIBLÉE avant la feature : $feature_name
 3. APIs ou données publiques exploitables
 4. Mets à jour research/ et ajuste les specs dans ROADMAP.md si nécessaire
 EOF
-    )" "$MAX_TURNS_RESEARCH_EPIC" "$LOG_DIR/research-epic-$FEATURE_COUNT.log" "research-epic" "$feature_name"
+    )" "$MAX_TURNS_RESEARCH_EPIC" "$LOG_DIR/research-epic-$FEATURE_COUNT.log" "research-epic" "$feature_name" || {
+      log WARN "Veille ciblée échouée ou timeout — on continue sans."
+    }
   fi
 
   # --- Implémentation ---
@@ -675,7 +686,9 @@ EOF
     "TESTS_PASSED=$tests_passed" \
     "FIX_ATTEMPTS=$attempt" \
     "N=$FEATURE_COUNT")
-  run_claude "$reflect_prompt" 20 "$LOG_DIR/feature-$FEATURE_COUNT-reflect.log" "reflect" "$feature_name"
+  run_claude "$reflect_prompt" 20 "$LOG_DIR/feature-$FEATURE_COUNT-reflect.log" "reflect" "$feature_name" || {
+    log WARN "Rétrospective échouée — on continue."
+  }
 
   # --- Merge si OK ---
   if [ "$tests_passed" = true ]; then
@@ -685,7 +698,9 @@ EOF
 
     current_branch=$(run_in_project "git branch --show-current 2>/dev/null || echo ''")
     if [ -n "$current_branch" ] && [ "$current_branch" != "main" ]; then
-      run_in_project "git checkout main 2>/dev/null && git merge --no-ff '$current_branch' -m 'feat: $feature_name' 2>/dev/null || true"
+      # Sanitize feature name : supprimer les apostrophes qui cassent eval
+      local safe_feature_name="${feature_name//\'/}"
+      run_in_project "git checkout main 2>/dev/null && git merge --no-ff '$current_branch' -m \"feat: $safe_feature_name\" 2>/dev/null || true"
     fi
 
     log INFO "Feature '$feature_name' mergée."
@@ -702,7 +717,9 @@ EOF
   if [ $((FEATURE_COUNT % META_RETRO_FREQUENCY)) -eq 0 ]; then
     log PHASE "MÉTA-RÉTROSPECTIVE — $FEATURE_COUNT features"
     retro_prompt=$(render_phase "06-meta-retro.md" "FEATURE_COUNT=$FEATURE_COUNT")
-    run_claude "$retro_prompt" "$MAX_TURNS_RESEARCH_TREND" "$LOG_DIR/meta-retro-$FEATURE_COUNT.log" "meta-retro"
+    run_claude "$retro_prompt" "$MAX_TURNS_RESEARCH_TREND" "$LOG_DIR/meta-retro-$FEATURE_COUNT.log" "meta-retro" || {
+      log WARN "Méta-rétrospective échouée — on continue."
+    }
     log INFO "Méta-rétrospective terminée."
   fi
 

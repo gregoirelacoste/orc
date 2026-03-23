@@ -44,30 +44,52 @@
 
 ## Backlog (à faire)
 
-### v0.6.0 — Robustesse & DX
+### v0.6.0 — Déploiement VPS + CLI agent
+> Objectif : gérer l'orchestrateur depuis n'importe où (SSH mobile/desktop)
+
+- [ ] `deploy.sh` — script d'installation one-shot sur VPS Ubuntu/Debian
+  - Installe Node.js 22, jq, git, Claude Code CLI
+  - Clone le repo template dans `/opt/autonome-agent/`
+  - Configure `ANTHROPIC_API_KEY` dans `.env`
+  - Crée `~/projects/` et symlink `agent` global
+- [ ] `agent.sh` — CLI de gestion multi-projets
+  - `agent new <nom>` — crée un workspace (interactif ou `--brief`)
+  - `agent start <nom>` — lance l'orchestrateur en background (nohup + .pid)
+  - `agent stop <nom>` — arrêt propre (SIGTERM → 30s → SIGKILL)
+  - `agent restart <nom>` — stop + start
+  - `agent status` — tableau de tous les projets (running/stopped/done, features, coût)
+  - `agent status <nom>` — détail d'un projet
+  - `agent logs <nom>` — tail -f en temps réel
+  - `agent logs <nom> --full` — log complet (less)
+  - `agent update` — git pull du template
+- [ ] `briefs/` — dossier pour stocker des briefs réutilisables dans le template
+  - `briefs/pc-builder.md` — le brief PC Builder comme exemple
+- [ ] Mettre à jour `.gitignore` (permettre briefs/, ignorer .env)
+- [ ] Mettre à jour `README.md` — section VPS + agent CLI
+- [ ] Cible : VPS IONOS Cloud S (upgrade vers 2GB+ RAM) — Berlin, 217.160.34.6
+
+### v0.7.0 — Robustesse & DX
 - [ ] Synchroniser ARCHITECTURE.md avec l'état réel (noms de variables, flow, phases)
-- [ ] Ajouter un mode `--dry-run` : simuler le flow sans lancer Claude (debug)
-- [ ] Ajouter un mode `--status` : afficher l'état du projet (features, tokens, coût)
-- [ ] Ajouter un mode `--resume` explicite (vs détection auto)
-- [ ] Gérer le cas "toutes les features cochées mais pas de DONE.md" (boucle infinie potentielle entre strategy et evolve)
-- [ ] Tests automatisés : script de test qui simule un flow complet avec un mock de Claude
-- [ ] shellcheck clean (corriger tous les warnings)
+- [ ] Mode `--dry-run` : simuler le flow sans lancer Claude (debug)
+- [ ] Gérer le cas "toutes features cochées mais pas DONE.md" (boucle infinie strategy/evolve)
+- [ ] Tests automatisés : script de test avec mock Claude
+- [ ] shellcheck clean
 
-### v0.7.0 — Intelligence des prompts
-- [ ] Améliorer render_phase : utiliser `envsubst` ou un vrai template engine pour éviter les problèmes de caractères spéciaux
-- [ ] Prompt dynamique : injecter l'état courant (features faites, échecs, coût) dans chaque prompt
-- [ ] Context carry : résumer la feature précédente dans le prompt de la suivante (contre le context reset)
-- [ ] Phase de quality gate optionnelle entre implement et test (lint, type-check)
+### v0.8.0 — Intelligence des prompts
+- [ ] Améliorer render_phase (`envsubst` ou template engine)
+- [ ] Prompt dynamique : injecter l'état courant dans chaque prompt
+- [ ] Context carry : résumé de la feature précédente dans le prompt de la suivante
+- [ ] Phase quality gate optionnelle (lint, type-check) entre implement et test
 
-### v0.8.0 — Multi-projet
-- [ ] Commande `status --all` : voir l'état de tous les workspaces
-- [ ] Remontée automatique des orchestrator-improvements.md vers le template
-- [ ] Versioning du workspace : savoir quelle version du template a été utilisée
-- [ ] Commande `upgrade` : mettre à jour un workspace existant avec le dernier template
+### v0.9.0 — Infra avancée
+- [ ] Intégration GitHub Actions (workflow_dispatch, state sur branches)
+- [ ] Notifications (Telegram/Slack) quand feature terminée ou erreur
+- [ ] Commande `agent upgrade <nom>` : mettre à jour un workspace avec le dernier template
+- [ ] Versioning du workspace : tag quelle version du template a été utilisée
 
 ### Idées (non priorisé)
-- [ ] Notifications (Slack/webhook) quand une feature est mergée ou quand le projet est bloqué
-- [ ] Dashboard web local pour visualiser les tokens, la roadmap, les logs
+- [ ] Dashboard web pour visualiser tokens, roadmap, logs
 - [ ] Support d'autres LLM CLI (pas que Claude)
 - [ ] Mode "pair" : deux instances Claude qui review le code l'une de l'autre
-- [ ] Intégration GitHub Actions : lancer l'orchestrateur en CI
+- [ ] Mode "brief interactif distant" : Claude rédige le brief via SSH (déjà supporté par init.sh)
+- [ ] Cron optionnel : relancer automatiquement l'orchestrateur après un arrêt/crash
