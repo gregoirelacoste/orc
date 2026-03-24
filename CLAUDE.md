@@ -16,7 +16,7 @@ Autonome Agent est un **meta-outil** : un orchestrateur bash qui pilote Claude C
 ## Architecture
 
 ```
-autonome-agent/              ← CE REPO (template, jamais modifié par un projet)
+orc/                         ← CE REPO (template, jamais modifié par un projet)
 ├── orc.sh                   ← CLI unifiée : point d'entrée unique (orc agent|roadmap|admin)
 ├── orc-agent.sh             ← Sous-commandes projets (new, start, stop, status, logs, roadmap)
 ├── orc-admin.sh             ← Sous-commandes admin (config, model, budget, key, version)
