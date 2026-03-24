@@ -175,17 +175,17 @@ admin_budget() {
 
     local cost="0" input_t="0" output_t="0" invocations="0" limit="illimité"
 
-    if [ -f "$proj_dir/logs/tokens.json" ]; then
+    if [ -f "$proj_dir/.orc/tokens.json" ]; then
       has_data=true
-      cost=$(jq -r '.total_cost_usd // 0' "$proj_dir/logs/tokens.json" 2>/dev/null || echo "0")
-      input_t=$(jq -r '.total_input_tokens // 0' "$proj_dir/logs/tokens.json" 2>/dev/null || echo "0")
-      output_t=$(jq -r '.total_output_tokens // 0' "$proj_dir/logs/tokens.json" 2>/dev/null || echo "0")
-      invocations=$(jq -r '.invocations // 0' "$proj_dir/logs/tokens.json" 2>/dev/null || echo "0")
+      cost=$(jq -r '.total_cost_usd // 0' "$proj_dir/.orc/tokens.json" 2>/dev/null || echo "0")
+      input_t=$(jq -r '.total_input_tokens // 0' "$proj_dir/.orc/tokens.json" 2>/dev/null || echo "0")
+      output_t=$(jq -r '.total_output_tokens // 0' "$proj_dir/.orc/tokens.json" 2>/dev/null || echo "0")
+      invocations=$(jq -r '.invocations // 0' "$proj_dir/.orc/tokens.json" 2>/dev/null || echo "0")
     fi
 
-    if [ -f "$proj_dir/config.sh" ]; then
+    if [ -f "$proj_dir/.orc/config.sh" ]; then
       local max_budget
-      max_budget=$(grep -oP 'MAX_BUDGET_USD="\K[^"]+' "$proj_dir/config.sh" 2>/dev/null || echo "")
+      max_budget=$(grep -oP 'MAX_BUDGET_USD="\K[^"]+' "$proj_dir/.orc/config.sh" 2>/dev/null || echo "")
       [ -n "$max_budget" ] && limit="\$$max_budget"
     fi
 

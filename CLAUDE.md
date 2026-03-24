@@ -40,10 +40,15 @@ autonome-agent/              ← CE REPO (template, jamais modifié par un proje
 ```
 ../mon-projet/               ← Auto-contenu, indépendant du template
 ├── orchestrator.sh          ← Copie
-├── config.sh                ← Personnalisé
 ├── BRIEF.md                 ← Brief produit
 ├── phases/, skills-templates/
-├── logs/                    ← Logs orchestrateur + tokens.json + state.json
+├── .orc/                    ← État orchestrateur (partiellement gitté)
+│   ├── config.sh            ← Personnalisé (gitté)
+│   ├── state.json           ← Runtime (ignoré)
+│   ├── tokens.json          ← Coûts (ignoré)
+│   ├── .lock                ← Lockfile (ignoré)
+│   ├── .pid                 ← PID du process (ignoré)
+│   └── logs/                ← Logs orchestrateur (ignoré)
 └── project/                 ← Code produit (son propre git)
 ```
 
@@ -68,9 +73,10 @@ autonome-agent/              ← CE REPO (template, jamais modifié par un proje
 - **printf > echo -e** : pour la portabilité des couleurs
 - **Chemins absolus** : `PROJECT_DIR` et `LOG_DIR` résolus au démarrage via `realpath`
 - **Dégradation gracieuse** : si `jq` absent, le tracking tokens est désactivé (pas de crash)
-- **Lockfile** : `.orchestrator.lock` avec PID pour empêcher l'exécution concurrente
+- **Lockfile** : `.orc/.lock` avec PID pour empêcher l'exécution concurrente
 - **Signal handling** : trap `EXIT INT TERM` pour cleanup (kill Claude, rm temp files, save state)
-- **State persistence** : `state.json` sauvegardé après chaque feature pour reprise après crash
+- **State persistence** : `.orc/state.json` sauvegardé après chaque feature pour reprise après crash
+- **Dossier `.orc/`** : tout l'état orchestrateur (config, state, tokens, logs, lock, pid) est centralisé dans `.orc/`
 
 ## Règles de modification
 

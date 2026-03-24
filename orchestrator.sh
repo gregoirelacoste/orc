@@ -13,7 +13,15 @@ set -euo pipefail
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/config.sh"
+# Config : cherche d'abord dans .orc/, puis à la racine (rétrocompat)
+if [ -f "$SCRIPT_DIR/.orc/config.sh" ]; then
+  source "$SCRIPT_DIR/.orc/config.sh"
+elif [ -f "$SCRIPT_DIR/config.sh" ]; then
+  source "$SCRIPT_DIR/config.sh"
+else
+  echo "ERREUR : config.sh introuvable (ni .orc/config.sh ni config.sh)" >&2
+  exit 1
+fi
 
 # Convertir les chemins relatifs en absolus
 PROJECT_DIR="$(cd "$SCRIPT_DIR" && realpath "$PROJECT_DIR" 2>/dev/null || echo "$SCRIPT_DIR/$PROJECT_DIR")"
@@ -31,10 +39,10 @@ NC='\033[0m'
 FEATURE_COUNT=0
 EPIC_FEATURE_COUNT=0
 TOTAL_FAILURES=0
-STATE_FILE="$SCRIPT_DIR/logs/state.json"
+STATE_FILE="$SCRIPT_DIR/.orc/state.json"
 
 # === TRACKING TOKENS ===
-TOKENS_FILE="$LOG_DIR/tokens.json"
+TOKENS_FILE="$SCRIPT_DIR/.orc/tokens.json"
 TOTAL_INPUT_TOKENS=0
 TOTAL_OUTPUT_TOKENS=0
 TOTAL_COST_USD=0
@@ -44,7 +52,7 @@ COST_PER_INPUT_TOKEN=0.000015
 COST_PER_OUTPUT_TOKEN=0.000075
 
 # === LOCKFILE ===
-LOCKFILE="$SCRIPT_DIR/.orchestrator.lock"
+LOCKFILE="$SCRIPT_DIR/.orc/.lock"
 
 # === CLEANUP & SIGNAL HANDLING ===
 CLAUDE_PID=""
@@ -510,6 +518,9 @@ if [ ! -f "$SCRIPT_DIR/BRIEF.md" ]; then
   printf "    ${CYAN}./init.sh mon-projet${NC}\n"
   exit 1
 fi
+
+# S'assurer que .orc/ existe (state, logs, lock)
+mkdir -p "$SCRIPT_DIR/.orc"
 
 # Lockfile — empêche l'exécution concurrente
 if [ -f "$LOCKFILE" ]; then

@@ -43,5 +43,5 @@ CLAUDE_TIMEOUT=1200                      # Timeout par invocation Claude en seco
                                          # 1200 = 20min. Les phases WebSearch peuvent être longues.
 
 # === LOGS ===
-LOG_DIR="./logs"                         # Dossier des logs orchestrateur
+LOG_DIR="./.orc/logs"                    # Dossier des logs orchestrateur (dans .orc/)
 VERBOSE=true                             # Logs détaillés dans la console

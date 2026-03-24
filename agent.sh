@@ -62,7 +62,7 @@ is_running() {
   local name="$1"
   local dir
   dir=$(project_dir "$name")
-  local pidfile="$dir/.pid"
+  local pidfile="$dir/.orc/.pid"
 
   if [ -f "$pidfile" ]; then
     local pid
@@ -109,9 +109,9 @@ cmd_new() {
   cp -r "$TEMPLATE_DIR/phases" "$dir/"
   cp -r "$TEMPLATE_DIR/skills-templates" "$dir/"
   cp "$TEMPLATE_DIR/BRIEF.template.md" "$dir/"
-  cp "$TEMPLATE_DIR/config.default.sh" "$dir/config.sh"
   chmod +x "$dir/orchestrator.sh"
-  mkdir -p "$dir/logs"
+  mkdir -p "$dir/.orc/logs"
+  cp "$TEMPLATE_DIR/config.default.sh" "$dir/.orc/config.sh"
 
   # Créer project/ avec son propre git
   mkdir -p "$dir/project"
@@ -170,7 +170,7 @@ Pose les questions une par une. Écris le résultat dans BRIEF.md." --max-turns 
   echo ""
   printf "${GREEN}Projet '%s' prêt.${NC}\n" "$name"
   printf "  Lancer : ${CYAN}agent start %s${NC}\n" "$name"
-  printf "  Éditer la config : ${CYAN}vim %s/config.sh${NC}\n" "$dir"
+  printf "  Éditer la config : ${CYAN}vim %s/.orc/config.sh${NC}\n" "$dir"
   echo ""
 }
 
@@ -188,7 +188,7 @@ cmd_start() {
 
   if is_running "$name"; then
     local pid
-    pid=$(cat "$dir/.pid")
+    pid=$(cat "$dir/.orc/.pid")
     die "Déjà en cours (PID $pid). Voir : agent logs $name"
   fi
 
@@ -201,10 +201,10 @@ cmd_start() {
   [ -z "$ANTHROPIC_API_KEY" ] && die "ANTHROPIC_API_KEY non configurée. Relancez deploy.sh."
 
   # Lancer en background
-  ( cd "$dir" && nohup ./orchestrator.sh >> logs/orchestrator.log 2>&1 & echo $! > .pid )
+  ( cd "$dir" && nohup ./orchestrator.sh >> .orc/logs/orchestrator.log 2>&1 & echo $! > .orc/.pid )
 
   local pid
-  pid=$(cat "$dir/.pid")
+  pid=$(cat "$dir/.orc/.pid")
 
   printf "${GREEN}Projet '%s' lancé${NC} (PID %s)\n" "$name" "$pid"
   printf "  Logs : ${CYAN}agent logs %s${NC}\n" "$name"
@@ -230,7 +230,7 @@ cmd_stop() {
   fi
 
   local pid
-  pid=$(cat "$dir/.pid")
+  pid=$(cat "$dir/.orc/.pid")
 
   printf "Arrêt de '%s' (PID %s)..." "$name" "$pid"
 
@@ -250,7 +250,7 @@ cmd_stop() {
     kill -9 "$pid" 2>/dev/null || true
   fi
 
-  rm -f "$dir/.pid"
+  rm -f "$dir/.orc/.pid"
   printf " ${GREEN}arrêté.${NC}\n"
 }
 
@@ -310,19 +310,19 @@ cmd_status() {
 
     # Features
     local feat_count="0" max_feat="?" failures="0"
-    if [ -f "$proj_dir/logs/state.json" ]; then
-      feat_count=$(jq -r '.feature_count // 0' "$proj_dir/logs/state.json" 2>/dev/null || echo "0")
-      failures=$(jq -r '.total_failures // 0' "$proj_dir/logs/state.json" 2>/dev/null || echo "0")
+    if [ -f "$proj_dir/.orc/state.json" ]; then
+      feat_count=$(jq -r '.feature_count // 0' "$proj_dir/.orc/state.json" 2>/dev/null || echo "0")
+      failures=$(jq -r '.total_failures // 0' "$proj_dir/.orc/state.json" 2>/dev/null || echo "0")
     fi
-    if [ -f "$proj_dir/config.sh" ]; then
-      max_feat=$(grep -oP 'MAX_FEATURES=\K\d+' "$proj_dir/config.sh" 2>/dev/null || echo "?")
+    if [ -f "$proj_dir/.orc/config.sh" ]; then
+      max_feat=$(grep -oP 'MAX_FEATURES=\K\d+' "$proj_dir/.orc/config.sh" 2>/dev/null || echo "?")
     fi
 
     # Coût
     local cost="\$0.00"
-    if [ -f "$proj_dir/logs/tokens.json" ]; then
+    if [ -f "$proj_dir/.orc/tokens.json" ]; then
       local raw_cost
-      raw_cost=$(jq -r '.total_cost_usd // 0' "$proj_dir/logs/tokens.json" 2>/dev/null || echo "0")
+      raw_cost=$(jq -r '.total_cost_usd // 0' "$proj_dir/.orc/tokens.json" 2>/dev/null || echo "0")
       cost="\$$raw_cost"
     fi
 
@@ -365,27 +365,27 @@ cmd_status_detail() {
     printf "  Status : ${GREEN}terminé${NC}\n"
   elif is_running "$name"; then
     local pid
-    pid=$(cat "$dir/.pid")
+    pid=$(cat "$dir/.orc/.pid")
     printf "  Status : ${CYAN}en cours${NC} (PID %s)\n" "$pid"
   else
     printf "  Status : ${YELLOW}arrêté${NC}\n"
   fi
 
   # State
-  if [ -f "$dir/logs/state.json" ]; then
+  if [ -f "$dir/.orc/state.json" ]; then
     local feat fail
-    feat=$(jq -r '.feature_count // 0' "$dir/logs/state.json" 2>/dev/null)
-    fail=$(jq -r '.total_failures // 0' "$dir/logs/state.json" 2>/dev/null)
+    feat=$(jq -r '.feature_count // 0' "$dir/.orc/state.json" 2>/dev/null)
+    fail=$(jq -r '.total_failures // 0' "$dir/.orc/state.json" 2>/dev/null)
     printf "  Features : %s | Échecs : %s\n" "$feat" "$fail"
   fi
 
   # Tokens
-  if [ -f "$dir/logs/tokens.json" ]; then
+  if [ -f "$dir/.orc/tokens.json" ]; then
     local cost invocations tokens_in tokens_out
-    cost=$(jq -r '.total_cost_usd // 0' "$dir/logs/tokens.json" 2>/dev/null)
-    invocations=$(jq -r '.invocations // 0' "$dir/logs/tokens.json" 2>/dev/null)
-    tokens_in=$(jq -r '.total_input_tokens // 0' "$dir/logs/tokens.json" 2>/dev/null)
-    tokens_out=$(jq -r '.total_output_tokens // 0' "$dir/logs/tokens.json" 2>/dev/null)
+    cost=$(jq -r '.total_cost_usd // 0' "$dir/.orc/tokens.json" 2>/dev/null)
+    invocations=$(jq -r '.invocations // 0' "$dir/.orc/tokens.json" 2>/dev/null)
+    tokens_in=$(jq -r '.total_input_tokens // 0' "$dir/.orc/tokens.json" 2>/dev/null)
+    tokens_out=$(jq -r '.total_output_tokens // 0' "$dir/.orc/tokens.json" 2>/dev/null)
     printf "  Coût : \$%s (%s invocations, %s in / %s out)\n" "$cost" "$invocations" "$tokens_in" "$tokens_out"
   fi
 
@@ -398,10 +398,10 @@ cmd_status_detail() {
   fi
 
   # Dernières lignes du log
-  if [ -f "$dir/logs/orchestrator.log" ]; then
+  if [ -f "$dir/.orc/logs/orchestrator.log" ]; then
     echo ""
     printf "  ${DIM}── Dernières lignes du log ──${NC}\n"
-    tail -8 "$dir/logs/orchestrator.log" 2>/dev/null | sed 's/^/  /'
+    tail -8 "$dir/.orc/logs/orchestrator.log" 2>/dev/null | sed 's/^/  /'
   fi
 
   echo ""
@@ -418,7 +418,7 @@ cmd_logs() {
 
   local dir
   dir=$(project_dir "$name")
-  local logfile="$dir/logs/orchestrator.log"
+  local logfile="$dir/.orc/logs/orchestrator.log"
 
   [ -f "$logfile" ] || die "Pas de log trouvé pour '$name'"
 
