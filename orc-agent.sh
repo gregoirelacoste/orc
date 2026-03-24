@@ -169,7 +169,7 @@ cmd_start() {
     CLAUDE_MODEL=$(cat "$model_file")
   fi
 
-  ( cd "$dir" && nohup ./orchestrator.sh >> .orc/.orc/logs/orchestrator.log 2>&1 & echo $! > .orc/.pid )
+  ( cd "$dir" && nohup ./orchestrator.sh >> .orc/logs/orchestrator.log 2>&1 & echo $! > .orc/.pid )
 
   local pid
   pid=$(cat "$dir/.orc/.pid")
