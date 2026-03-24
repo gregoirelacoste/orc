@@ -431,6 +431,349 @@ cmd_logs() {
 }
 
 # ============================================================
+# COMMANDE : roadmap
+# ============================================================
+
+# Parse le frontmatter YAML d'un fichier roadmap item
+# Usage: parse_frontmatter "file.md" "field"
+# Retourne la valeur du champ
+parse_frontmatter() {
+  local file="$1"
+  local field="$2"
+  # Extraire entre les deux --- et chercher le champ
+  awk -v field="$field" '
+    /^---$/ { block++; next }
+    block == 1 {
+      # Gérer les champs simples : "key: value" ou "key: \"value\""
+      if ($0 ~ "^" field ":") {
+        sub("^" field ":[[:space:]]*", "")
+        gsub(/^"|"$/, "")
+        print
+        exit
+      }
+    }
+    block >= 2 { exit }
+  ' "$file"
+}
+
+# Parse les tags (array YAML) d'un fichier roadmap item
+parse_tags() {
+  local file="$1"
+  awk '
+    /^---$/ { block++; next }
+    block == 1 && /^tags:/ {
+      sub(/^tags:[[:space:]]*\[/, "")
+      sub(/\][[:space:]]*$/, "")
+      gsub(/,[ ]*/, ",")
+      print
+      exit
+    }
+    block >= 2 { exit }
+  ' "$file"
+}
+
+# Parse les dépendances (array YAML)
+parse_depends() {
+  local file="$1"
+  awk '
+    /^---$/ { block++; next }
+    block == 1 && /^depends:/ {
+      sub(/^depends:[[:space:]]*\[/, "")
+      sub(/\][[:space:]]*$/, "")
+      gsub(/,[ ]*/, ",")
+      print
+      exit
+    }
+    block >= 2 { exit }
+  ' "$file"
+}
+
+# Extraire une section markdown (## Titre) d'un fichier
+extract_section() {
+  local file="$1"
+  local section="$2"
+  local max_lines="${3:-999}"
+  awk -v section="$section" -v max="$max_lines" '
+    /^---$/ { block++; next }
+    block < 2 { next }
+    $0 ~ "^## " section { found=1; next }
+    found && /^## / { exit }
+    found { count++; if (count <= max) print }
+  ' "$file"
+}
+
+# Couleur selon la priorité
+priority_color() {
+  case "$1" in
+    P0) printf "${RED}" ;;
+    P1) printf "${YELLOW}" ;;
+    P2) printf "${BLUE}" ;;
+    P3) printf "${DIM}" ;;
+    *)  printf "${NC}" ;;
+  esac
+}
+
+# Symbole selon le statut (dossier)
+status_symbol() {
+  case "$1" in
+    in-progress) printf "${CYAN}●${NC}" ;;
+    planned)     printf "○" ;;
+    backlog)     printf "${DIM}◌${NC}" ;;
+    done)        printf "${GREEN}✓${NC}" ;;
+    *)           printf "?" ;;
+  esac
+}
+
+# Tri des items : P0 d'abord, puis P1, etc. À effort égal, XL d'abord.
+sort_items() {
+  # Reçoit des lignes : "priority|effort|status|file"
+  # Trie par priorité (P0<P1<P2<P3) puis effort (XL>L>M>S>XS)
+  sort -t'|' -k1,1 -k2,2r
+}
+
+# Effort en valeur numérique pour le tri
+effort_sort_key() {
+  case "$1" in
+    XL) echo "5" ;;
+    L)  echo "4" ;;
+    M)  echo "3" ;;
+    S)  echo "2" ;;
+    XS) echo "1" ;;
+    *)  echo "0" ;;
+  esac
+}
+
+cmd_roadmap() {
+  local verbosity="compact"
+  local filter_priority="" filter_tag="" filter_epic="" filter_type="" filter_status=""
+
+  # Parse les options
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --detail)    verbosity="detail"; shift ;;
+      --full)      verbosity="full"; shift ;;
+      --priority)  filter_priority="${2:-}"; shift 2 ;;
+      --tag)       filter_tag="${2:-}"; shift 2 ;;
+      --epic)      filter_epic="${2:-}"; shift 2 ;;
+      --type)      filter_type="${2:-}"; shift 2 ;;
+      --status)    filter_status="${2:-}"; shift 2 ;;
+      -h|--help)   cmd_roadmap_help; return ;;
+      *) die "Option inconnue : $1. Voir : agent roadmap --help" ;;
+    esac
+  done
+
+  local roadmap_dir="$TEMPLATE_DIR/roadmap"
+  [ -d "$roadmap_dir" ] || die "Dossier roadmap/ non trouvé dans $TEMPLATE_DIR"
+
+  # Compter par priorité
+  local count_p0=0 count_p1=0 count_p2=0 count_p3=0 count_total=0
+
+  # Collecter tous les items
+  local items_data=""
+  for status_dir in in-progress planned backlog done; do
+    local dir="$roadmap_dir/$status_dir"
+    [ -d "$dir" ] || continue
+
+    # Filtrer par statut si demandé
+    if [ -n "$filter_status" ] && [ "$filter_status" != "$status_dir" ]; then
+      continue
+    fi
+
+    for item_file in "$dir"/ROADMAP-*.md; do
+      [ -f "$item_file" ] || continue
+
+      local item_id item_title item_priority item_type item_effort item_tags item_epic
+
+      item_id=$(parse_frontmatter "$item_file" "id")
+      item_title=$(parse_frontmatter "$item_file" "title")
+      item_priority=$(parse_frontmatter "$item_file" "priority")
+      item_type=$(parse_frontmatter "$item_file" "type")
+      item_effort=$(parse_frontmatter "$item_file" "effort")
+      item_tags=$(parse_tags "$item_file")
+      item_epic=$(parse_frontmatter "$item_file" "epic")
+
+      # Appliquer les filtres
+      if [ -n "$filter_priority" ] && [ "$item_priority" != "$filter_priority" ]; then
+        continue
+      fi
+      if [ -n "$filter_tag" ]; then
+        if ! echo ",$item_tags," | grep -qi ",$filter_tag,"; then
+          continue
+        fi
+      fi
+      if [ -n "$filter_epic" ] && [ "$item_epic" != "$filter_epic" ]; then
+        continue
+      fi
+      if [ -n "$filter_type" ] && [ "$item_type" != "$filter_type" ]; then
+        continue
+      fi
+
+      # Compter par priorité
+      case "$item_priority" in
+        P0) count_p0=$((count_p0 + 1)) ;;
+        P1) count_p1=$((count_p1 + 1)) ;;
+        P2) count_p2=$((count_p2 + 1)) ;;
+        P3) count_p3=$((count_p3 + 1)) ;;
+      esac
+      count_total=$((count_total + 1))
+
+      # Stocker pour tri : priority|effort_key|status|file|id|title|priority_raw|type|effort|tags|epic
+      local ekey
+      ekey=$(effort_sort_key "$item_effort")
+      items_data+="${item_priority}|${ekey}|${status_dir}|${item_file}|${item_id}|${item_title}|${item_priority}|${item_type}|${item_effort}|${item_tags}|${item_epic}"$'\n'
+    done
+  done
+
+  if [ "$count_total" -eq 0 ]; then
+    printf "\n${DIM}Aucun item dans la roadmap.${NC}\n\n"
+    return
+  fi
+
+  # Header
+  echo ""
+  printf "${BOLD}ROADMAP — autonome-agent${NC}"
+  printf "         ${RED}P0: %d${NC} | ${YELLOW}P1: %d${NC} | ${BLUE}P2: %d${NC} | ${DIM}P3: %d${NC}\n" \
+    "$count_p0" "$count_p1" "$count_p2" "$count_p3"
+  printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+  # Trier les items
+  local sorted_items
+  sorted_items=$(echo "$items_data" | grep -v '^$' | sort_items)
+
+  # Afficher par statut
+  local current_status=""
+  while IFS='|' read -r _prio _ekey status filepath item_id item_title priority item_type effort tags epic; do
+    [ -z "$status" ] && continue
+
+    # Nouveau groupe de statut
+    if [ "$status" != "$current_status" ]; then
+      current_status="$status"
+      local status_label count_in_status
+      case "$status" in
+        in-progress) status_label="EN COURS" ;;
+        planned)     status_label="PLANIFIÉ" ;;
+        backlog)     status_label="BACKLOG" ;;
+        done)        status_label="TERMINÉ" ;;
+        *)           status_label="$status" ;;
+      esac
+      count_in_status=$(echo "$sorted_items" | grep -c "|${status}|" 2>/dev/null || echo "0")
+      echo ""
+      printf " ${BOLD}%s${NC} (%d)\n" "$status_label" "$count_in_status"
+    fi
+
+    # Symbole et couleur
+    local sym pcolor
+    sym=$(status_symbol "$status")
+    pcolor=$(priority_color "$priority")
+
+    # === Niveau COMPACT ===
+    printf "  %b ${pcolor}%-12s${NC} [%s/%s] %-42s ${DIM}%s${NC}\n" \
+      "$sym" "$item_id" "$priority" "$effort" "$item_title" "$tags"
+
+    # === Niveau DETAIL ===
+    if [ "$verbosity" = "detail" ] || [ "$verbosity" = "full" ]; then
+      # Contexte (3 premières lignes)
+      local context
+      context=$(extract_section "$filepath" "Contexte" 3)
+      if [ -n "$context" ]; then
+        echo "$context" | while IFS= read -r line; do
+          printf "    ${DIM}%s${NC}\n" "$line"
+        done
+      fi
+
+      # Dépendances
+      local deps
+      deps=$(parse_depends "$filepath")
+      if [ -n "$deps" ] && [ "$deps" != "[]" ]; then
+        printf "    ${DIM}Dépend de : %s${NC}\n" "$deps"
+      fi
+
+      # Epic
+      if [ -n "$epic" ] && [ "$epic" != '""' ]; then
+        printf "    ${DIM}Epic : %s${NC}\n" "$epic"
+      fi
+
+      # Dates
+      local created updated
+      created=$(parse_frontmatter "$filepath" "created")
+      updated=$(parse_frontmatter "$filepath" "updated")
+      if [ -n "$created" ]; then
+        printf "    ${DIM}Créé : %s | MàJ : %s${NC}\n" "$created" "${updated:-$created}"
+      fi
+      echo ""
+    fi
+
+    # === Niveau FULL ===
+    if [ "$verbosity" = "full" ]; then
+      # Spécification complète
+      local spec
+      spec=$(extract_section "$filepath" "Spécification")
+      if [ -n "$spec" ]; then
+        printf "    ${BOLD}Spécification :${NC}\n"
+        echo "$spec" | while IFS= read -r line; do
+          printf "    %s\n" "$line"
+        done
+        echo ""
+      fi
+
+      # Critères de validation
+      local criteria
+      criteria=$(extract_section "$filepath" "Critères de validation")
+      if [ -n "$criteria" ]; then
+        printf "    ${BOLD}Critères :${NC}\n"
+        echo "$criteria" | while IFS= read -r line; do
+          printf "    %s\n" "$line"
+        done
+        echo ""
+      fi
+
+      # Notes
+      local notes
+      notes=$(extract_section "$filepath" "Notes")
+      if [ -n "$notes" ]; then
+        printf "    ${DIM}Notes : %s${NC}\n" "$(echo "$notes" | head -3 | tr '\n' ' ')"
+        echo ""
+      fi
+
+      printf "    ──────────────────────────────────────────────────────\n"
+    fi
+
+  done <<< "$sorted_items"
+
+  echo ""
+
+  # Filtres actifs
+  local active_filters=""
+  [ -n "$filter_priority" ] && active_filters+="priority=$filter_priority "
+  [ -n "$filter_tag" ] && active_filters+="tag=$filter_tag "
+  [ -n "$filter_epic" ] && active_filters+="epic=$filter_epic "
+  [ -n "$filter_type" ] && active_filters+="type=$filter_type "
+  [ -n "$filter_status" ] && active_filters+="status=$filter_status "
+  if [ -n "$active_filters" ]; then
+    printf "${DIM}Filtres actifs : %s${NC}\n\n" "$active_filters"
+  fi
+}
+
+cmd_roadmap_help() {
+  echo ""
+  printf "${BOLD}agent roadmap — Suivi de la roadmap${NC}\n"
+  echo ""
+  printf "  ${CYAN}agent roadmap${NC}                    Vue compacte\n"
+  printf "  ${CYAN}agent roadmap --detail${NC}            Vue détaillée (contexte, dépendances)\n"
+  printf "  ${CYAN}agent roadmap --full${NC}              Vue exhaustive (specs, critères)\n"
+  echo ""
+  printf "  ${BOLD}Filtres :${NC}\n"
+  printf "  ${CYAN}--priority P0|P1|P2|P3${NC}           Par priorité\n"
+  printf "  ${CYAN}--tag <tag>${NC}                      Par tag\n"
+  printf "  ${CYAN}--epic <epic>${NC}                    Par epic\n"
+  printf "  ${CYAN}--type <type>${NC}                    Par type (feature, bugfix, etc.)\n"
+  printf "  ${CYAN}--status <status>${NC}                Par statut (planned, in-progress, etc.)\n"
+  echo ""
+  printf "  ${DIM}Filtres combinables : agent roadmap --priority P1 --tag adoption${NC}\n"
+  echo ""
+}
+
+# ============================================================
 # COMMANDE : update
 # ============================================================
 
@@ -463,6 +806,9 @@ cmd_help() {
   printf "  ${CYAN}agent status <nom>${NC}                  Détail d'un projet\n"
   printf "  ${CYAN}agent logs <nom>${NC}                    Logs temps réel\n"
   printf "  ${CYAN}agent logs <nom> --full${NC}             Log complet\n"
+  printf "  ${CYAN}agent roadmap${NC}                       Roadmap compacte\n"
+  printf "  ${CYAN}agent roadmap --detail${NC}              Roadmap détaillée\n"
+  printf "  ${CYAN}agent roadmap --full${NC}                Roadmap exhaustive\n"
   printf "  ${CYAN}agent update${NC}                        Mettre à jour le template\n"
   printf "  ${CYAN}agent help${NC}                          Cette aide\n"
   echo ""
@@ -482,6 +828,7 @@ case "$COMMAND" in
   restart) cmd_restart "$@" ;;
   status)  cmd_status "$@" ;;
   logs)    cmd_logs "$@" ;;
+  roadmap) cmd_roadmap "$@" ;;
   update)  cmd_update ;;
   help|-h|--help) cmd_help ;;
   *) die "Commande inconnue : $COMMAND. Voir : agent help" ;;

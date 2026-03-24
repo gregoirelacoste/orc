@@ -18,10 +18,16 @@ Autonome Agent est un **meta-outil** : un orchestrateur bash qui pilote Claude C
 ```
 autonome-agent/              ← CE REPO (template, jamais modifié par un projet)
 ├── orchestrator.sh          ← Boucle principale : bootstrap → research → strategy → feature loop → evolve
+├── agent.sh                 ← CLI multi-projets (new, start, stop, status, roadmap, logs)
 ├── init.sh                  ← Wizard interactif : crée un workspace SÉPARÉ (../mon-projet/)
 ├── config.default.sh        ← Template de config (copié et personnalisé par init.sh)
 ├── phases/                  ← Prompts Markdown avec placeholders {{VAR}} pour chaque phase
 ├── skills-templates/        ← Skills copiées dans project/.claude/skills/ au bootstrap
+├── roadmap/                 ← Items de roadmap structurés (backlog → planned → in-progress → done)
+│   ├── backlog/             ← Idées non priorisées
+│   ├── planned/             ← Priorisées, prêtes à implémenter
+│   ├── in-progress/         ← En cours de développement
+│   └── done/                ← Terminées
 ├── BRIEF.template.md        ← Template de brief produit
 ├── ARCHITECTURE.md          ← Documentation complète du système
 └── README.md                ← Mode d'emploi
@@ -74,6 +80,19 @@ Substitue `{{VAR}}` dans les prompts. Attention : la substitution bash `${conten
 
 ### Reprise après crash
 Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe ? → skip research. Features non-cochées dans ROADMAP ? → skip strategy. `state.json` → restaure les compteurs.
+
+## Roadmap
+
+Les items de roadmap sont des fichiers `.md` individuels dans `roadmap/`.
+Le statut est déterminé par le sous-dossier (`backlog/`, `planned/`, `in-progress/`, `done/`).
+
+Chaque item a un frontmatter YAML avec : `id`, `priority` (P0-P3), `type`, `effort` (XS-XL), `tags`, `epic`, `depends`.
+
+- **Consulter** : `agent roadmap` (compact), `--detail`, `--full`
+- **Filtrer** : `--priority P1`, `--tag adoption`, `--epic adopt-mode`
+- **Créer un item** : copier `roadmap/TEMPLATE.md`, incrémenter l'ID
+- **Changer de statut** : `mv roadmap/planned/ROADMAP-NNN.md roadmap/in-progress/`
+- **Skill** : `skills-templates/roadmap-item.md` guide la création pendant les rétrospectives
 
 ## Version actuelle
 
