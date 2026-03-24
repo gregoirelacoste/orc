@@ -260,11 +260,18 @@ $prompt"
   # Lancer Claude en background avec output stream-JSON (JSONL)
   # stream-json produit des événements au fil de l'eau → le watchdog
   # peut détecter les vrais stalls (contrairement à json qui bufferise tout)
+  local model_flag=""
+  if [ -n "${CLAUDE_MODEL:-}" ]; then
+    model_flag="--model $CLAUDE_MODEL"
+  fi
+
+  # shellcheck disable=SC2086
   claude -p "$full_prompt" \
     --dangerously-skip-permissions \
     --max-turns "$max_turns" \
     --output-format stream-json \
     --verbose \
+    $model_flag \
     -d "$PROJECT_DIR" > "$TMP_JSON" 2>&1 &
 
   CLAUDE_PID=$!

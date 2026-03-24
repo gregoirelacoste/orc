@@ -17,8 +17,11 @@ Autonome Agent est un **meta-outil** : un orchestrateur bash qui pilote Claude C
 
 ```
 autonome-agent/              ← CE REPO (template, jamais modifié par un projet)
+├── orc.sh                   ← CLI unifiée : point d'entrée unique (orc agent|roadmap|admin)
+├── orc-agent.sh             ← Sous-commandes projets (new, start, stop, status, logs, roadmap)
+├── orc-admin.sh             ← Sous-commandes admin (config, model, budget, key, version)
 ├── orchestrator.sh          ← Boucle principale : bootstrap → research → strategy → feature loop → evolve
-├── agent.sh                 ← CLI multi-projets (new, start, stop, status, roadmap, logs)
+├── agent.sh                 ← CLI legacy (compatibilité, redirige vers orc)
 ├── init.sh                  ← Wizard interactif : crée un workspace SÉPARÉ (../mon-projet/)
 ├── config.default.sh        ← Template de config (copié et personnalisé par init.sh)
 ├── phases/                  ← Prompts Markdown avec placeholders {{VAR}} pour chaque phase
@@ -46,7 +49,15 @@ autonome-agent/              ← CE REPO (template, jamais modifié par un proje
 
 ## Commandes
 
+### CLI unifiée (`orc`)
+- `orc agent new|start|stop|status|logs <nom>` — gestion des projets
+- `orc roadmap [--detail|--full] [--priority P1] [--tag x]` — suivi roadmap
+- `orc admin config|model|budget|key|version` — administration
+- `orc s` / `orc r` / `orc l <nom>` — raccourcis (status, roadmap, logs)
+
+### Développement
 - `bash -n orchestrator.sh` — vérifier la syntaxe sans exécuter
+- `bash -n orc.sh && bash -n orc-agent.sh && bash -n orc-admin.sh` — vérifier toute la CLI
 - `shellcheck orchestrator.sh` — lint statique (si shellcheck installé)
 - Pas de test framework — la validation se fait par dry-run sur un projet réel
 
