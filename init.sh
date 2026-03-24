@@ -11,7 +11,7 @@ set -euo pipefail
 #   ./init.sh mon-projet --skip-brief  — init sans brief interactif
 #
 # Crée un dossier SÉPARÉ (par défaut ../mon-projet/) contenant
-# tout le nécessaire. Le repo autonome-agent reste un template propre.
+# tout le nécessaire. Le repo orc reste un template propre.
 # ============================================================
 
 TEMPLATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
