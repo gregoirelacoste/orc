@@ -24,12 +24,16 @@ AUTO_EVOLVE_ROADMAP=true                 # Claude peut ajouter des features à l
 MAX_EVOLVE_CYCLES=2                      # Nombre max de cycles evolve (0 = illimité)
 MAX_AI_ROADMAP_ADDS=5                    # Max features ajoutées par l'IA entre deux pauses humaines
 
-# === GITHUB INTEGRATION ===
+# === GITHUB (optionnel — tout fonctionne sans) ===
+# Principe : local = source de vérité, GitHub = miroir de visibilité.
+# Chaque option est indépendante et off par défaut. Activer selon les besoins.
 GIT_STRATEGY="local"                     # "local" (git merge direct) | "pr" (GitHub Pull Requests)
                                          # "pr" nécessite gh CLI authentifié + remote GitHub
-GITHUB_TRACKING_ISSUE=true               # Créer une issue de suivi sur GitHub (requires gh + GIT_STRATEGY=pr)
+GITHUB_TRACKING_ISSUE=false              # Créer une issue de suivi sur GitHub (résumé du run)
+                                         # Fonctionne en mode local et pr. Requiert gh CLI.
 GITHUB_SIGNALS=false                     # Lire les labels GitHub comme signaux (pause/stop/continue)
                                          # Labels attendus : "orc:pause", "orc:stop", "orc:continue"
+                                         # Les signaux locaux (.orc/pause-requested etc.) marchent toujours.
 GITHUB_REMOTE="origin"                   # Remote Git pour push/PR (défaut: origin)
 
 # === NOTIFICATIONS ===

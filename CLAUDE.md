@@ -104,13 +104,14 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe
 - `.orc/pause-requested` / `.orc/stop-after-feature` : signaux file-based pour le mode nohup
 - `logs/human-feedback-N.md` : feedback structuré, prioritaire sur les observations de l'IA
 
-### GitHub Integration (`GIT_STRATEGY`)
-Deux modes : `local` (défaut, merge direct) et `pr` (GitHub Pull Requests).
-- **Mode `pr`** : chaque feature crée une PR via `gh`, attend review si `REQUIRE_HUMAN_APPROVAL=true`, merge via GitHub, fallback local si échec.
-- **Tracking issue** : `GITHUB_TRACKING_ISSUE=true` crée une issue "ORC Run" au bootstrap, commentée à chaque feature (début/fin/abandon), fermée en fin de run.
-- **Signaux GitHub** : `GITHUB_SIGNALS=true` lit les labels `orc:pause`, `orc:stop`, `orc:continue` sur la tracking issue dans `check_signals()`.
-- **Features abandonnées** : auto-création d'une issue "bug" avec les fix-reflections quand une feature est abandonnée.
-- **Dégradation gracieuse** : si `gh` absent ou non authentifié, tout fonctionne en mode local.
+### GitHub Integration (local-first, GitHub-augmented)
+**Principe** : local = source de vérité, GitHub = miroir de visibilité. Tout fonctionne sans GitHub. Chaque option est indépendante et off par défaut.
+- **`GIT_STRATEGY`** : `local` (défaut, merge direct) | `pr` (GitHub PRs). Fallback local si PR échoue.
+- **Tracking issue** : `GITHUB_TRACKING_ISSUE=true` crée une issue "ORC Run", commentée à chaque feature. Fonctionne en mode `local` et `pr`.
+- **Signaux GitHub** : `GITHUB_SIGNALS=true` lit les labels `orc:pause`, `orc:stop`, `orc:continue`. Les signaux locaux (`.orc/`) fonctionnent toujours, GitHub est un canal additionnel.
+- **Approbation multi-source** : terminal (`c`), fichier local (`touch .orc/approve`), ou PR review GitHub. Premier arrivé gagne.
+- **Features abandonnées** : auto-création d'une issue "bug" avec les fix-reflections (si `gh` disponible).
+- **Dégradation gracieuse** : `gh` absent → tout fonctionne en local sans erreur.
 - Fonctions : `gh_available()`, `gh_pr_mode()`, `gh_create_tracking_issue()`, `gh_create_pr()`, `gh_merge_pr()`, `gh_comment()`, `gh_check_signals()`, `gh_create_abandoned_issue()`, `gh_close_tracking_issue()`.
 
 ### Détection de boucle fix
