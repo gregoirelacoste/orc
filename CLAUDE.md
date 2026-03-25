@@ -112,6 +112,10 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe
 ### Mémoire inter-projets
 `learnings/` dans le template accumule les insights. Copiés dans le projet au bootstrap, lus par la phase 00.
 
+### Connaissance projet (CODEBASE.md + stack-conventions.md)
+- `CODEBASE.md` : inventaire vivant du projet (modules, exports, utilities, APIs, data models, décisions d'architecture). Mis à jour à chaque reflect. Consulté AVANT chaque implémentation pour éviter la duplication.
+- `.claude/skills/stack-conventions.md` : conventions spécifiques à la stack (React, Astro, Java, etc.), patterns adoptés, anti-patterns, utilities réutilisables, patterns de sécurité. Auto-enrichi au fil du projet.
+
 ## Roadmap
 
 Les items de roadmap sont des fichiers `.md` individuels dans `roadmap/`.

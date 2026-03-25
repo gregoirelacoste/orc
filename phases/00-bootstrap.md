@@ -19,12 +19,38 @@ Tu démarres un nouveau projet autonome.
    - Architecture choisie et pourquoi
    - Conventions de code
    - Règles strictes (build doit passer, tests obligatoires, etc.)
+   - Section "## Conventions de stack" avec les patterns spécifiques
+     à la stack choisie (React, Astro, Java, etc.)
+   - Section "## Anti-patterns" avec les erreurs classiques de cette stack
 
-4. Crée les skills de base dans .claude/skills/ :
+4. Crée CODEBASE.md — l'inventaire vivant du projet :
+   ```markdown
+   # Codebase Inventory
+   > Ce fichier est mis à jour automatiquement après chaque feature.
+   > Consulte-le AVANT de coder pour éviter la duplication.
+
+   ## Modules & Exports
+   (sera rempli au fil des features)
+
+   ## Utilities & Helpers
+   (fonctions réutilisables — NE PAS dupliquer, utiliser l'existant)
+
+   ## External Integrations
+   (APIs, services tiers, SDKs intégrés)
+
+   ## Data Models
+   (schémas DB, types, interfaces partagées)
+
+   ## Architecture Decisions
+   (choix techniques et leur justification)
+   ```
+
+5. Crée les skills de base dans .claude/skills/ :
    - implement-feature.md (workflow d'implémentation)
    - fix-tests.md (workflow de correction de tests)
    - research.md (workflow de veille)
    - review-own-code.md (auto-review avant commit)
+   - stack-conventions.md (rempli avec les conventions de la stack choisie)
 
 5. Crée un ROADMAP.md initial vide (sera rempli après la recherche) :
    ```
@@ -32,4 +58,11 @@ Tu démarres un nouveau projet autonome.
    > Sera structurée après la phase de recherche initiale.
    ```
 
-6. Commite : "chore: bootstrap project structure"
+6. Initialise stack-conventions.md avec les patterns de la stack :
+   - Si React/Next.js : hooks patterns, server/client components, state management
+   - Si Astro : islands architecture, content collections, SSG vs SSR
+   - Si Java/Spring : dependency injection, repository pattern, DTOs
+   - Si Python/Django : models, views, serializers, middleware
+   - Adapte au contexte du BRIEF, pas de conventions génériques inutiles
+
+7. Commite : "chore: bootstrap project structure"

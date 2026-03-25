@@ -204,16 +204,19 @@ Si attempt == MAX_FIX:
 
 ### 3d. Reflect & Evolve (auto-amélioration)
 
-Après chaque feature, Claude améliore ses propres outils :
+Après chaque feature, Claude enrichit sa connaissance du projet :
 
-1. **CLAUDE.md** — ajoute des règles si piège découvert, supprime les obsolètes
-2. **Skills** — crée un nouveau skill si pattern répété manuellement,
+1. **CODEBASE.md** — met à jour l'inventaire vivant : nouveaux modules, utilities, APIs, data models, décisions d'architecture. Consultable par les features suivantes pour éviter la duplication.
+2. **stack-conventions.md** — enrichit les conventions spécifiques à la stack : nouveaux patterns, anti-patterns, optimisations, patterns de sécurité validés.
+3. **CLAUDE.md** — ajoute des règles si piège découvert, supprime les obsolètes
+4. **Skills** — crée un nouveau skill si pattern répété manuellement,
    met à jour un skill existant s'il était inadapté
-3. **ROADMAP.md** — coche la feature, ajoute des dépendances découvertes
-4. **Logs** — écrit `logs/retrospective-N.md`
+5. **ROADMAP.md** — coche la feature, ajoute des dépendances découvertes
+6. **Logs** — écrit `logs/retrospective-N.md` avec mesure de réutilisation vs création
 
-> C'est cette phase qui fait que la feature 20 est mieux implémentée
-> que la feature 1 : l'agent a appris de SES propres erreurs sur CE projet.
+> L'IA ne s'améliore pas seulement sur le process : elle construit une
+> expertise du projet. À la feature 20, elle connaît chaque module, chaque
+> convention, chaque utility — et ne duplique plus rien.
 
 ---
 
@@ -247,19 +250,23 @@ Claude analyse le projet terminé et :
 
 | Fichier | Rôle | Modifié quand |
 |---|---|---|
+| `CODEBASE.md` | Inventaire du projet | Après chaque feature (Reflect) |
+| `stack-conventions.md` | Conventions de stack | Après chaque feature (Reflect) |
 | `CLAUDE.md` | Ses instructions | Après chaque feature (Reflect) |
 | `.claude/skills/*.md` | Ses workflows | Quand un pattern se répète |
-| `.claude/memory/` | Sa mémoire | Leçons inter-sessions |
 | `ROADMAP.md` | Sa direction | Méta-rétros + veille |
-| `.claude/settings.json` | Ses hooks/permissions | Si besoin d'automatiser |
 
-Le cycle vertueux :
+Le cycle vertueux (process + projet) :
 ```
 Feature 1 : erreurs basiques → Reflect ajoute 3 règles au CLAUDE.md
+Feature 2 : crée formatDate() → Reflect l'ajoute à CODEBASE.md
 Feature 3 : même type d'erreur E2E → crée un skill fix-e2e.md
-Feature 5 : méta-rétro → CLAUDE.md nettoyé, skills affinées
+Feature 4 : besoin de formater une date → consulte CODEBASE.md → réutilise formatDate()
+Feature 5 : méta-rétro → CLAUDE.md nettoyé, stack-conventions.md enrichi
+Feature 8 : pattern répété → ajouté à stack-conventions.md → plus jamais oublié
 Feature 10 : dette technique détectée → refactoring ajouté à la roadmap
-Feature 15 : plateau → les améliorations deviennent marginales
+Feature 15 : l'IA connaît chaque module, convention, utility → zéro duplication
+Feature 20 : expertise projet complète → implémentation rapide et cohérente
 ```
 
 ---
@@ -380,6 +387,26 @@ Le dossier `learnings/` dans le template accumule les apprentissages :
 - Au bootstrap d'un nouveau projet, l'IA lit les learnings existants
 - Les règles et pièges pertinents sont intégrés dans le CLAUDE.md initial
 
+### Connaissance projet vivante (CODEBASE.md + stack-conventions.md)
+
+**CODEBASE.md** — inventaire vivant du projet, mis à jour après chaque feature :
+- Modules & Exports (fonctions, classes, composants avec chemin et description)
+- Utilities & Helpers (réutilisables — à consulter AVANT de créer du nouveau code)
+- External Integrations (APIs, services tiers, SDKs)
+- Data Models (schémas, types, interfaces)
+- Architecture Decisions (choix techniques avec justification)
+
+**stack-conventions.md** — skill auto-enrichie, spécifique à la stack du projet :
+- Conventions de code adoptées (nommage, structure, patterns)
+- Anti-patterns identifiés (erreurs à ne pas reproduire)
+- Utilities créées et réutilisables
+- Patterns de sécurité validés
+- Optimisations de performance appliquées
+
+Le cycle : implement consulte → reflect enrichit → implement suivant consulte → ...
+L'effet cumulatif fait que l'IA duplique de moins en moins et respecte de mieux
+en mieux les conventions au fil des features.
+
 ---
 
 ## Structure complète des fichiers
@@ -391,12 +418,15 @@ project/
 ├── ROADMAP.md                  # Backlog en epics (auto-évolutif)
 ├── DONE.md                     # Créé quand le projet est terminé
 │
+├── CODEBASE.md                  # Inventaire vivant (modules, utilities, APIs, decisions)
+│
 ├── .claude/
 │   ├── skills/                 # Workflows auto-générés
 │   │   ├── implement-feature.md
 │   │   ├── fix-tests.md
 │   │   ├── research.md
 │   │   ├── review-own-code.md
+│   │   ├── stack-conventions.md # Conventions spécifiques à la stack (auto-enrichi)
 │   │   └── evolve-workflow.md
 │   ├── settings.json
 │   └── memory/
