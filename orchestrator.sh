@@ -1294,8 +1294,10 @@ l'orchestrateur lui-même (pas le projet, l'OUTIL qui pilote les projets).
 Lis :
 1. Tous les fichiers logs/retrospective-*.md
 2. Tous les fichiers logs/meta-retrospective-*.md
-3. Le CLAUDE.md final (les règles que tu t'es auto-ajoutées)
-4. Les skills dans .claude/skills/ (celles que tu as créées)
+3. Tous les fichiers logs/fix-reflections-*.md
+4. Tous les fichiers logs/human-feedback-*.md
+5. Le CLAUDE.md final (les règles que tu t'es auto-ajoutées)
+6. Les skills dans .claude/skills/ (celles que tu as créées)
 
 Analyse :
 - Quels prompts de phase ont produit les meilleurs résultats ?
@@ -1303,6 +1305,9 @@ Analyse :
 - Quels types d'erreurs l'orchestrateur n'a pas su gérer ?
 - Quelles étapes manquent dans le workflow ?
 - Les garde-fous étaient-ils bien calibrés ?
+- Le système de connaissance (codebase/, auto-map, stack-conventions) a-t-il fonctionné ?
+- La détection de boucle et les réflexions ont-elles aidé ?
+- Le contexte adaptatif par phase était-il pertinent ?
 
 Produis un fichier `orchestrator-improvements.md` dans le dossier courant
 avec cette structure :
@@ -1322,8 +1327,15 @@ Pour chaque phase concernée :
 ### Nouvelles skills utiles
 - [nom du skill] — [ce qu'il fait] — [pourquoi il serait utile]
 
+### Système de connaissance (codebase/, auto-map, stack-conventions)
+- [ce qui a bien marché] — [ce qu'il faudrait améliorer]
+- L'index était-il utile ? L'auto-map était-il à jour ? Les conventions respectées ?
+
 ### Garde-fous
 - [garde-fou à ajouter/modifier] — [incident qui l'a motivé]
+
+### Conventions bash découvertes
+- Si tu as découvert des patterns bash utiles, note-les pour stack-conventions.md de l'orchestrateur
 
 Sois concret et actionnable.
 IMPROVE
@@ -1337,10 +1349,49 @@ if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
   {
     echo "# Learnings — ${PROJECT_NAME:-project}"
     echo "Date : $(date '+%Y-%m-%d')"
+    echo "Features : $FEATURE_COUNT | Échecs : $TOTAL_FAILURES | Coût : \$$TOTAL_COST_USD"
     echo ""
     cat "$PROJECT_DIR/orchestrator-improvements.md"
   } > "$learning_file"
   log INFO "Learnings sauvés dans le template : $learning_file"
+
+  # Extraire les conventions bash découvertes et les ajouter à ORC stack-conventions
+  local orc_conventions="$SCRIPT_DIR/.claude/skills/stack-conventions.md"
+  if [ -f "$orc_conventions" ]; then
+    # Demander à Claude d'enrichir les stack-conventions de ORC
+    run_claude "Lis le fichier orchestrator-improvements.md que tu viens de produire.
+S'il contient des conventions bash, des anti-patterns, ou des patterns utiles
+qui s'appliquent à l'orchestrateur lui-même (pas au projet), alors :
+
+1. Lis le fichier .claude/skills/stack-conventions.md (les conventions actuelles de ORC)
+2. Ajoute les nouvelles conventions découvertes dans les sections appropriées
+3. Ne duplique pas ce qui existe déjà
+4. Garde le fichier concis
+
+S'il n'y a rien de nouveau à ajouter, ne modifie rien." \
+      10 "$LOG_DIR/orc-conventions-update.log" "self-improve" || {
+      log WARN "Mise à jour des conventions ORC échouée — pas grave."
+    }
+  fi
+
+  # Mettre à jour codebase/INDEX.md de ORC si des changements structurels ont été faits
+  local orc_index="$SCRIPT_DIR/codebase/INDEX.md"
+  if [ -f "$orc_index" ]; then
+    run_claude "Lis le fichier orchestrator-improvements.md et vérifie si les améliorations
+proposées impactent la structure de l'orchestrateur (nouvelles fonctions, nouveaux fichiers,
+changements de config, nouveaux paramètres).
+
+Si oui :
+1. Lis codebase/INDEX.md (l'index sémantique de ORC)
+2. Lis le fichier de détail pertinent dans codebase/
+3. Mets-les à jour pour refléter les changements
+4. Garde l'index compact (max 40 lignes)
+
+Si les améliorations sont mineures ou ne changent pas la structure, ne modifie rien." \
+      10 "$LOG_DIR/orc-index-update.log" "self-improve" || {
+      log WARN "Mise à jour de l'index ORC échouée — pas grave."
+    }
+  fi
 fi
 
 # ============================================================
