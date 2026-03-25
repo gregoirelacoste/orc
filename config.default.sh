@@ -33,6 +33,7 @@ BUILD_COMMAND="npm run build"            # Commande de build
 TEST_COMMAND="npx playwright test"       # Commande de test
 DEV_COMMAND="npm run dev"                # Commande serveur dev
 LINT_COMMAND="npm run lint"              # Commande lint (vide = désactivé)
+CLAUDE_MODEL=""                          # Modèle Claude (vide = défaut CLI). Ex: "claude-sonnet-4-6-20250514"
 
 # === BUDGET ===
 MAX_BUDGET_USD=""                        # Budget max en USD (vide = illimité). Ex: "5.00"
@@ -42,5 +43,5 @@ CLAUDE_TIMEOUT=1200                      # Timeout par invocation Claude en seco
                                          # 1200 = 20min. Les phases WebSearch peuvent être longues.
 
 # === LOGS ===
-LOG_DIR="./logs"                         # Dossier des logs orchestrateur
+LOG_DIR="./.orc/logs"                    # Dossier des logs orchestrateur (dans .orc/)
 VERBOSE=true                             # Logs détaillés dans la console

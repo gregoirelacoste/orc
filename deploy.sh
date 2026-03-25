@@ -21,9 +21,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-INSTALL_DIR="/opt/autonome-agent"
+INSTALL_DIR="/opt/orc"
 PROJECTS_DIR="$HOME/projects"
-REPO_URL="https://github.com/gregoirelacoste/autonome-agent.git"
+REPO_URL="https://github.com/gregoirelacoste/orc.git"
 
 # ============================================================
 echo ""
@@ -138,9 +138,11 @@ chmod +x "$INSTALL_DIR"/*.sh
 mkdir -p "$PROJECTS_DIR"
 printf "  ${GREEN}✓${NC} Dossier projets : %s\n" "$PROJECTS_DIR"
 
-# Symlink CLI globale
-ln -sf "$INSTALL_DIR/agent.sh" /usr/local/bin/agent
-printf "  ${GREEN}✓${NC} Commande 'agent' disponible globalement\n"
+# Symlinks CLI globales
+ln -sf "$INSTALL_DIR/orc.sh" /usr/local/bin/orc
+ln -sf "$INSTALL_DIR/agent.sh" /usr/local/bin/agent    # compatibilité
+printf "  ${GREEN}✓${NC} Commande 'orc' disponible globalement\n"
+printf "  ${GREEN}✓${NC} Commande 'agent' disponible (compatibilité)\n"
 
 # ============================================================
 printf "\n${BOLD}5/5 — Configuration${NC}\n"
@@ -227,10 +229,11 @@ printf "${GREEN}║  Installation terminée !                          ║${NC}\
 printf "${GREEN}╚═══════════════════════════════════════════════════╝${NC}\n"
 echo ""
 printf "  ${BOLD}Usage :${NC}\n"
-printf "    ${CYAN}agent new mon-projet${NC}                    # Créer un projet\n"
-printf "    ${CYAN}agent new mon-projet --brief briefs/x.md${NC} # Avec brief existant\n"
-printf "    ${CYAN}agent start mon-projet${NC}                  # Lancer\n"
-printf "    ${CYAN}agent status${NC}                            # Vue d'ensemble\n"
-printf "    ${CYAN}agent logs mon-projet${NC}                   # Logs temps réel\n"
-printf "    ${CYAN}agent stop mon-projet${NC}                   # Arrêter\n"
+printf "    ${CYAN}orc agent new mon-projet${NC}                # Créer un projet\n"
+printf "    ${CYAN}orc agent start mon-projet${NC}              # Lancer\n"
+printf "    ${CYAN}orc s${NC}                                   # Vue d'ensemble\n"
+printf "    ${CYAN}orc logs mon-projet${NC}                     # Logs temps réel\n"
+printf "    ${CYAN}orc roadmap${NC}                             # Roadmap\n"
+printf "    ${CYAN}orc admin config${NC}                        # Configuration\n"
+printf "    ${CYAN}orc help${NC}                                # Aide complète\n"
 echo ""

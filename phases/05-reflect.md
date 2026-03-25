@@ -12,8 +12,13 @@ Analyse cette itération et améliore ton workflow :
    Si un skill existant était inadapté, mets-le à jour.
 
 3. **ROADMAP.md** — Coche la feature terminée.
-   Si l'implémentation t'a révélé de nouvelles dépendances
-   ou features nécessaires, ajoute-les à la roadmap.
+   Si l'implémentation t'a révélé de nouvelles dépendances,
+   features nécessaires, bugs ou améliorations :
+   - Crée un item dans `roadmap/backlog/` en suivant le format
+     défini dans le skill `roadmap-item.md`
+   - Chaque item = un fichier ROADMAP-NNN-slug.md avec frontmatter YAML
+   - Assigne une priorité (P0-P3), un type, un effort estimé, des tags
+   - Référence la feature courante dans la section Contexte
 
 4. **Architecture** — Si tu as dû contourner l'architecture,
    note-le. Si ça s'accumule, ajoute une tâche de refactoring.

@@ -11,7 +11,7 @@ set -euo pipefail
 #   ./init.sh mon-projet --skip-brief  — init sans brief interactif
 #
 # Crée un dossier SÉPARÉ (par défaut ../mon-projet/) contenant
-# tout le nécessaire. Le repo autonome-agent reste un template propre.
+# tout le nécessaire. Le repo orc reste un template propre.
 # ============================================================
 
 TEMPLATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -183,16 +183,19 @@ cp "$TEMPLATE_DIR/BRIEF.template.md" "$WORKSPACE_DIR/"
 
 echo -e "  ${GREEN}✓${NC} Orchestrateur copié"
 
-# Générer config.sh à partir du template
+# Créer .orc/ — état et config orchestrateur
+mkdir -p "$WORKSPACE_DIR/.orc/logs"
+
+# Générer .orc/config.sh à partir du template
 sed \
   -e "s|PROJECT_NAME=\"\"|PROJECT_NAME=\"$PROJECT_SLUG\"|" \
   -e "s|PAUSE_EVERY_N_FEATURES=0|PAUSE_EVERY_N_FEATURES=$PAUSE_N|" \
   -e "s|REQUIRE_HUMAN_APPROVAL=false|REQUIRE_HUMAN_APPROVAL=$HUMAN_APPROVAL|" \
   -e "s|ENABLE_RESEARCH=true|ENABLE_RESEARCH=$ENABLE_RESEARCH|" \
   -e "s|MAX_FEATURES=50|MAX_FEATURES=$MAX_FEAT|" \
-  "$TEMPLATE_DIR/config.default.sh" > "$WORKSPACE_DIR/config.sh"
+  "$TEMPLATE_DIR/config.default.sh" > "$WORKSPACE_DIR/.orc/config.sh"
 
-echo -e "  ${GREEN}✓${NC} config.sh généré"
+echo -e "  ${GREEN}✓${NC} .orc/config.sh généré"
 
 # Créer project/ avec son propre git
 mkdir -p "$WORKSPACE_DIR/project"
@@ -215,18 +218,20 @@ cp "$WORKSPACE_DIR/skills-templates/"*.md "$WORKSPACE_DIR/project/.claude/skills
 
 echo -e "  ${GREEN}✓${NC} Skills copiées dans project/.claude/skills/"
 
-# Créer le dossier logs de l'orchestrateur
-mkdir -p "$WORKSPACE_DIR/logs"
-
-echo -e "  ${GREEN}✓${NC} Dossier logs/ prêt"
+# .orc/logs/ déjà créé ci-dessus
+echo -e "  ${GREEN}✓${NC} Dossier .orc/ prêt (config, logs, state)"
 
 # Créer .gitignore pour le workspace
 cat > "$WORKSPACE_DIR/.gitignore" << 'GITIGNORE'
 # Projet généré (a son propre git)
 project/
 
-# Logs de l'orchestrateur
-logs/
+# État runtime orchestrateur (dans .orc/)
+.orc/logs/
+.orc/state.json
+.orc/tokens.json
+.orc/.lock
+.orc/.pid
 GITIGNORE
 
 echo -e "  ${GREEN}✓${NC} .gitignore créé"
@@ -328,11 +333,10 @@ echo ""
 echo -e "  ${BOLD}Structure :${NC}"
 echo -e "    $PROJECT_SLUG/"
 echo -e "    ├── BRIEF.md            $([ -f "$WORKSPACE_DIR/BRIEF.md" ] && echo -e "${GREEN}✓${NC}" || echo -e "${YELLOW}à rédiger${NC}")"
-echo -e "    ├── config.sh           ${GREEN}✓${NC}"
 echo -e "    ├── orchestrator.sh     ${GREEN}✓${NC}"
 echo -e "    ├── phases/             ${GREEN}✓${NC}"
 echo -e "    ├── skills-templates/   ${GREEN}✓${NC}"
-echo -e "    ├── logs/               ${GREEN}✓${NC}"
+echo -e "    ├── .orc/               ${GREEN}✓${NC} (config, logs, state)"
 echo -e "    └── project/            ${GREEN}✓${NC} (git indépendant)"
 echo ""
 echo -e "  ${BOLD}Prochaines étapes :${NC}"
@@ -345,6 +349,6 @@ fi
 echo -e "    ${CYAN}./orchestrator.sh${NC}         # lancer l'agent"
 echo ""
 echo -e "  En arrière-plan :"
-echo -e "    ${CYAN}nohup ./orchestrator.sh > logs/orchestrator.log 2>&1 &${NC}"
-echo -e "    ${CYAN}tail -f logs/orchestrator.log${NC}"
+echo -e "    ${CYAN}nohup ./orchestrator.sh > .orc/logs/orchestrator.log 2>&1 &${NC}"
+echo -e "    ${CYAN}tail -f .orc/logs/orchestrator.log${NC}"
 echo ""

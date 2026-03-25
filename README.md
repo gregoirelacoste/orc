@@ -12,8 +12,8 @@ Un agent Claude Code 100% autonome qui construit un produit de A à Z : veille m
 
 ```bash
 # 1. Cloner le template
-git clone git@github.com:gregoirelacoste/autonome-agent.git
-cd autonome-agent
+git clone git@github.com:gregoirelacoste/orc.git
+cd orc
 
 # 2. Initialiser un projet (crée un workspace séparé)
 ./init.sh pc-builder
@@ -28,18 +28,17 @@ cd ../pc-builder
 ### `init.sh` crée un workspace séparé
 
 ```
-autonome-agent/              ← ce repo (template, jamais modifié)
+orc/                         ← ce repo (template, jamais modifié)
 │
 └── ./init.sh mon-projet
          │
          ▼
 ../mon-projet/               ← workspace auto-contenu
 ├── BRIEF.md                 ← brief produit (rédigé avec Claude)
-├── config.sh                ← configuration du projet
 ├── orchestrator.sh          ← copié depuis le template
 ├── phases/                  ← copié depuis le template
 ├── skills-templates/        ← copié depuis le template
-├── logs/                    ← logs de l'orchestrateur
+├── .orc/                    ← état orchestrateur (config, logs, state)
 │
 └── project/                 ← le code produit (son propre repo git)
     ├── .git/

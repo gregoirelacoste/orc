@@ -1,63 +1,33 @@
 #!/bin/bash
-set -euo pipefail
-
 # ============================================================
-# Autonome Agent — CLI de gestion des projets
+# orc-agent.sh — Gestion des projets (sourcé par orc.sh)
 # ============================================================
 #
-# Usage :
-#   agent new <nom>                     Créer un projet
-#   agent new <nom> --brief briefs/x.md Avec un brief existant
-#   agent start <nom>                   Lancer en background
-#   agent stop <nom>                    Arrêter proprement
-#   agent restart <nom>                 Redémarrer
-#   agent status                        Vue d'ensemble
-#   agent status <nom>                  Détail d'un projet
-#   agent logs <nom>                    Logs temps réel
-#   agent logs <nom> --full             Log complet
-#   agent update                        Mettre à jour le template
+# Fonctions : cmd_new, cmd_start, cmd_stop, cmd_restart,
+#             cmd_status, cmd_logs, cmd_roadmap, cmd_update
+#
+# Variables attendues de orc.sh :
+#   ORC_DIR, PROJECTS_DIR (via env ou défaut),
+#   RED, GREEN, YELLOW, BLUE, CYAN, BOLD, DIM, NC, die()
 # ============================================================
 
-# Résoudre le chemin du template (là où agent.sh est installé)
-TEMPLATE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-PROJECTS_DIR="$HOME/projects"
-ENV_FILE="$TEMPLATE_DIR/.env"
-
-# Charger les clés API
-if [ -f "$ENV_FILE" ]; then
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
-fi
-
-# === COULEURS ===
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m'
+PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
 
 # ============================================================
-# FONCTIONS UTILITAIRES
+# UTILITAIRES
 # ============================================================
-
-die() { printf "${RED}Erreur : %s${NC}\n" "$1" >&2; exit 1; }
 
 project_dir() {
   echo "$PROJECTS_DIR/$1"
 }
 
-# Vérifie qu'un projet existe
 require_project() {
   local name="$1"
   local dir
   dir=$(project_dir "$name")
-  [ -d "$dir" ] || die "Projet '$name' non trouvé. Voir : agent status"
+  [ -d "$dir" ] || die "Projet '$name' non trouvé. Voir : orc agent status"
 }
 
-# Vérifie si l'orchestrateur tourne pour un projet
 is_running() {
   local name="$1"
   local dir
@@ -70,7 +40,6 @@ is_running() {
     if kill -0 "$pid" 2>/dev/null; then
       return 0
     fi
-    # PID mort, nettoyer
     rm -f "$pidfile"
   fi
   return 1
@@ -82,7 +51,7 @@ is_running() {
 
 cmd_new() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : agent new <nom> [--brief briefs/x.md]"
+  [ -z "$name" ] && die "Usage : orc agent new <nom> [--brief briefs/x.md]"
 
   local dir
   dir=$(project_dir "$name")
@@ -103,40 +72,35 @@ cmd_new() {
 
   printf "${BOLD}Création du projet '%s'...${NC}\n\n" "$name"
 
-  # Créer le workspace
   mkdir -p "$dir"
-  cp "$TEMPLATE_DIR/orchestrator.sh" "$dir/"
-  cp -r "$TEMPLATE_DIR/phases" "$dir/"
-  cp -r "$TEMPLATE_DIR/skills-templates" "$dir/"
-  cp "$TEMPLATE_DIR/BRIEF.template.md" "$dir/"
+  cp "$ORC_DIR/orchestrator.sh" "$dir/"
+  cp -r "$ORC_DIR/phases" "$dir/"
+  cp -r "$ORC_DIR/skills-templates" "$dir/"
+  cp "$ORC_DIR/BRIEF.template.md" "$dir/"
   chmod +x "$dir/orchestrator.sh"
   mkdir -p "$dir/.orc/logs"
-  cp "$TEMPLATE_DIR/config.default.sh" "$dir/.orc/config.sh"
+  cp "$ORC_DIR/config.default.sh" "$dir/.orc/config.sh"
 
-  # Créer project/ avec son propre git
   mkdir -p "$dir/project"
   ( cd "$dir/project" && git init -b main > /dev/null 2>&1 )
 
-  # Structure research/
   mkdir -p "$dir/project/research/competitors" \
            "$dir/project/research/trends" \
            "$dir/project/research/user-needs" \
            "$dir/project/research/regulations" \
            "$dir/project/logs"
 
-  # Skills
   mkdir -p "$dir/project/.claude/skills"
   cp "$dir/skills-templates/"*.md "$dir/project/.claude/skills/"
 
   printf "  ${GREEN}✓${NC} Workspace créé : %s\n" "$dir"
 
   if [ -n "$brief_file" ]; then
-    # Résoudre le chemin du brief (relatif au template ou absolu)
     local resolved_brief=""
     if [ -f "$brief_file" ]; then
       resolved_brief="$brief_file"
-    elif [ -f "$TEMPLATE_DIR/$brief_file" ]; then
-      resolved_brief="$TEMPLATE_DIR/$brief_file"
+    elif [ -f "$ORC_DIR/$brief_file" ]; then
+      resolved_brief="$ORC_DIR/$brief_file"
     else
       die "Brief non trouvé : $brief_file"
     fi
@@ -145,7 +109,6 @@ cmd_new() {
     cp "$resolved_brief" "$dir/project/BRIEF.md"
     printf "  ${GREEN}✓${NC} Brief copié depuis %s\n" "$brief_file"
   else
-    # Mode interactif — Claude rédige le brief
     printf "\n  ${CYAN}Claude va te poser des questions pour rédiger le brief...${NC}\n\n"
 
     local brief_skill
@@ -169,8 +132,8 @@ Pose les questions une par une. Écris le résultat dans BRIEF.md." --max-turns 
 
   echo ""
   printf "${GREEN}Projet '%s' prêt.${NC}\n" "$name"
-  printf "  Lancer : ${CYAN}agent start %s${NC}\n" "$name"
-  printf "  Éditer la config : ${CYAN}vim %s/.orc/config.sh${NC}\n" "$dir"
+  printf "  Lancer : ${CYAN}orc agent start %s${NC}\n" "$name"
+  printf "  Config : ${CYAN}vim %s/.orc/config.sh${NC}\n" "$dir"
   echo ""
 }
 
@@ -180,7 +143,7 @@ Pose les questions une par une. Écris le résultat dans BRIEF.md." --max-turns 
 
 cmd_start() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : agent start <nom>"
+  [ -z "$name" ] && die "Usage : orc agent start <nom>"
   require_project "$name"
 
   local dir
@@ -189,27 +152,32 @@ cmd_start() {
   if is_running "$name"; then
     local pid
     pid=$(cat "$dir/.orc/.pid")
-    die "Déjà en cours (PID $pid). Voir : agent logs $name"
+    die "Déjà en cours (PID $pid). Voir : orc logs $name"
   fi
 
   [ -f "$dir/BRIEF.md" ] || die "Pas de BRIEF.md dans $dir. Crée-le d'abord."
 
-  # Exporter les clés API
   export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
   export GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 
-  [ -z "$ANTHROPIC_API_KEY" ] && die "ANTHROPIC_API_KEY non configurée. Relancez deploy.sh."
+  [ -z "$ANTHROPIC_API_KEY" ] && die "ANTHROPIC_API_KEY non configurée. Voir : orc admin key"
 
-  # Lancer en background
+  # Injecter le modèle si configuré globalement
+  local model_file="$ORC_DIR/.model"
+  if [ -f "$model_file" ]; then
+    export CLAUDE_MODEL
+    CLAUDE_MODEL=$(cat "$model_file")
+  fi
+
   ( cd "$dir" && nohup ./orchestrator.sh >> .orc/logs/orchestrator.log 2>&1 & echo $! > .orc/.pid )
 
   local pid
   pid=$(cat "$dir/.orc/.pid")
 
   printf "${GREEN}Projet '%s' lancé${NC} (PID %s)\n" "$name" "$pid"
-  printf "  Logs : ${CYAN}agent logs %s${NC}\n" "$name"
-  printf "  Status : ${CYAN}agent status %s${NC}\n" "$name"
-  printf "  Stop : ${CYAN}agent stop %s${NC}\n" "$name"
+  printf "  Logs   : ${CYAN}orc logs %s${NC}\n" "$name"
+  printf "  Status : ${CYAN}orc s %s${NC}\n" "$name"
+  printf "  Stop   : ${CYAN}orc agent stop %s${NC}\n" "$name"
 }
 
 # ============================================================
@@ -218,7 +186,7 @@ cmd_start() {
 
 cmd_stop() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : agent stop <nom>"
+  [ -z "$name" ] && die "Usage : orc agent stop <nom>"
   require_project "$name"
 
   local dir
@@ -234,10 +202,8 @@ cmd_stop() {
 
   printf "Arrêt de '%s' (PID %s)..." "$name" "$pid"
 
-  # SIGTERM — l'orchestrateur gère le cleanup
   kill "$pid" 2>/dev/null || true
 
-  # Attendre max 30s
   local waited=0
   while [ $waited -lt 30 ] && kill -0 "$pid" 2>/dev/null; do
     sleep 1
@@ -260,7 +226,7 @@ cmd_stop() {
 
 cmd_restart() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : agent restart <nom>"
+  [ -z "$name" ] && die "Usage : orc agent restart <nom>"
   cmd_stop "$name"
   sleep 1
   cmd_start "$name"
@@ -278,7 +244,6 @@ cmd_status() {
     return
   fi
 
-  # Vue d'ensemble de tous les projets
   mkdir -p "$PROJECTS_DIR"
 
   local has_projects=false
@@ -295,7 +260,6 @@ cmd_status() {
     local proj_name
     proj_name=$(basename "$proj_dir")
 
-    # Status
     local status status_color
     if [ -f "$proj_dir/project/DONE.md" ]; then
       status="done"
@@ -308,7 +272,6 @@ cmd_status() {
       status_color="$YELLOW"
     fi
 
-    # Features
     local feat_count="0" max_feat="?" failures="0"
     if [ -f "$proj_dir/.orc/state.json" ]; then
       feat_count=$(jq -r '.feature_count // 0' "$proj_dir/.orc/state.json" 2>/dev/null || echo "0")
@@ -318,7 +281,6 @@ cmd_status() {
       max_feat=$(grep -oP 'MAX_FEATURES=\K\d+' "$proj_dir/.orc/config.sh" 2>/dev/null || echo "?")
     fi
 
-    # Coût
     local cost="\$0.00"
     if [ -f "$proj_dir/.orc/tokens.json" ]; then
       local raw_cost
@@ -326,7 +288,6 @@ cmd_status() {
       cost="\$$raw_cost"
     fi
 
-    # Roadmap
     local remaining="—"
     if [ -f "$proj_dir/project/ROADMAP.md" ]; then
       local todo
@@ -343,7 +304,7 @@ cmd_status() {
   done
 
   if [ "$has_projects" = false ]; then
-    printf "\n  ${DIM}Aucun projet. Créer : ${CYAN}agent new mon-projet${NC}\n"
+    printf "\n  ${DIM}Aucun projet. Créer : ${CYAN}orc agent new mon-projet${NC}\n"
   fi
 
   echo ""
@@ -360,7 +321,6 @@ cmd_status_detail() {
   printf "${BOLD}Projet : %s${NC}\n" "$name"
   printf "  Dossier : %s\n" "$dir"
 
-  # Status
   if [ -f "$dir/project/DONE.md" ]; then
     printf "  Status : ${GREEN}terminé${NC}\n"
   elif is_running "$name"; then
@@ -371,7 +331,6 @@ cmd_status_detail() {
     printf "  Status : ${YELLOW}arrêté${NC}\n"
   fi
 
-  # State
   if [ -f "$dir/.orc/state.json" ]; then
     local feat fail
     feat=$(jq -r '.feature_count // 0' "$dir/.orc/state.json" 2>/dev/null)
@@ -379,7 +338,6 @@ cmd_status_detail() {
     printf "  Features : %s | Échecs : %s\n" "$feat" "$fail"
   fi
 
-  # Tokens
   if [ -f "$dir/.orc/tokens.json" ]; then
     local cost invocations tokens_in tokens_out
     cost=$(jq -r '.total_cost_usd // 0' "$dir/.orc/tokens.json" 2>/dev/null)
@@ -389,15 +347,19 @@ cmd_status_detail() {
     printf "  Coût : \$%s (%s invocations, %s in / %s out)\n" "$cost" "$invocations" "$tokens_in" "$tokens_out"
   fi
 
-  # Roadmap
-  if [ -f "$dir/project/ROADMAP.md" ]; then
-    local done todo
-    done=$(grep -c '^\- \[x\]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
-    todo=$(grep -c '^\- \[ \]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
-    printf "  Roadmap : %s faites, %s restantes\n" "$done" "$todo"
+  # Modèle
+  local model_file="$ORC_DIR/.model"
+  if [ -f "$model_file" ]; then
+    printf "  Modèle : %s\n" "$(cat "$model_file")"
   fi
 
-  # Dernières lignes du log
+  if [ -f "$dir/project/ROADMAP.md" ]; then
+    local done_count todo
+    done_count=$(grep -c '^\- \[x\]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+    todo=$(grep -c '^\- \[ \]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+    printf "  Roadmap : %s faites, %s restantes\n" "$done_count" "$todo"
+  fi
+
   if [ -f "$dir/.orc/logs/orchestrator.log" ]; then
     echo ""
     printf "  ${DIM}── Dernières lignes du log ──${NC}\n"
@@ -413,7 +375,7 @@ cmd_status_detail() {
 
 cmd_logs() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : agent logs <nom> [--full]"
+  [ -z "$name" ] && die "Usage : orc logs <nom> [--full]"
   require_project "$name"
 
   local dir
@@ -431,20 +393,32 @@ cmd_logs() {
 }
 
 # ============================================================
+# COMMANDE : update
+# ============================================================
+
+cmd_update() {
+  printf "${BOLD}Mise à jour du template...${NC}\n"
+
+  if [ -d "$ORC_DIR/.git" ]; then
+    git -C "$ORC_DIR" pull --ff-only
+    printf "${GREEN}Template mis à jour.${NC}\n"
+    printf "${DIM}Note : les workspaces existants ne sont pas affectés.${NC}\n"
+  else
+    die "$ORC_DIR n'est pas un repo git."
+  fi
+}
+
+# ============================================================
 # COMMANDE : roadmap
 # ============================================================
 
 # Parse le frontmatter YAML d'un fichier roadmap item
-# Usage: parse_frontmatter "file.md" "field"
-# Retourne la valeur du champ
 parse_frontmatter() {
   local file="$1"
   local field="$2"
-  # Extraire entre les deux --- et chercher le champ
   awk -v field="$field" '
     /^---$/ { block++; next }
     block == 1 {
-      # Gérer les champs simples : "key: value" ou "key: \"value\""
       if ($0 ~ "^" field ":") {
         sub("^" field ":[[:space:]]*", "")
         gsub(/^"|"$/, "")
@@ -456,7 +430,6 @@ parse_frontmatter() {
   ' "$file"
 }
 
-# Parse les tags (array YAML) d'un fichier roadmap item
 parse_tags() {
   local file="$1"
   awk '
@@ -472,7 +445,6 @@ parse_tags() {
   ' "$file"
 }
 
-# Parse les dépendances (array YAML)
 parse_depends() {
   local file="$1"
   awk '
@@ -488,7 +460,6 @@ parse_depends() {
   ' "$file"
 }
 
-# Extraire une section markdown (## Titre) d'un fichier
 extract_section() {
   local file="$1"
   local section="$2"
@@ -502,7 +473,6 @@ extract_section() {
   ' "$file"
 }
 
-# Couleur selon la priorité
 priority_color() {
   case "$1" in
     P0) printf "${RED}" ;;
@@ -513,7 +483,6 @@ priority_color() {
   esac
 }
 
-# Symbole selon le statut (dossier)
 status_symbol() {
   case "$1" in
     in-progress) printf "${CYAN}●${NC}" ;;
@@ -524,14 +493,10 @@ status_symbol() {
   esac
 }
 
-# Tri des items : P0 d'abord, puis P1, etc. À effort égal, XL d'abord.
 sort_items() {
-  # Reçoit des lignes : "priority|effort|status|file"
-  # Trie par priorité (P0<P1<P2<P3) puis effort (XL>L>M>S>XS)
   sort -t'|' -k1,1 -k2,2r
 }
 
-# Effort en valeur numérique pour le tri
 effort_sort_key() {
   case "$1" in
     XL) echo "5" ;;
@@ -547,7 +512,6 @@ cmd_roadmap() {
   local verbosity="compact"
   local filter_priority="" filter_tag="" filter_epic="" filter_type="" filter_status=""
 
-  # Parse les options
   while [ $# -gt 0 ]; do
     case "$1" in
       --detail)    verbosity="detail"; shift ;;
@@ -558,23 +522,20 @@ cmd_roadmap() {
       --type)      filter_type="${2:-}"; shift 2 ;;
       --status)    filter_status="${2:-}"; shift 2 ;;
       -h|--help)   cmd_roadmap_help; return ;;
-      *) die "Option inconnue : $1. Voir : agent roadmap --help" ;;
+      *) die "Option inconnue : $1. Voir : orc roadmap --help" ;;
     esac
   done
 
-  local roadmap_dir="$TEMPLATE_DIR/roadmap"
-  [ -d "$roadmap_dir" ] || die "Dossier roadmap/ non trouvé dans $TEMPLATE_DIR"
+  local roadmap_dir="$ORC_DIR/roadmap"
+  [ -d "$roadmap_dir" ] || die "Dossier roadmap/ non trouvé dans $ORC_DIR"
 
-  # Compter par priorité
   local count_p0=0 count_p1=0 count_p2=0 count_p3=0 count_total=0
 
-  # Collecter tous les items
   local items_data=""
   for status_dir in in-progress planned backlog done; do
     local dir="$roadmap_dir/$status_dir"
     [ -d "$dir" ] || continue
 
-    # Filtrer par statut si demandé
     if [ -n "$filter_status" ] && [ "$filter_status" != "$status_dir" ]; then
       continue
     fi
@@ -592,7 +553,6 @@ cmd_roadmap() {
       item_tags=$(parse_tags "$item_file")
       item_epic=$(parse_frontmatter "$item_file" "epic")
 
-      # Appliquer les filtres
       if [ -n "$filter_priority" ] && [ "$item_priority" != "$filter_priority" ]; then
         continue
       fi
@@ -608,7 +568,6 @@ cmd_roadmap() {
         continue
       fi
 
-      # Compter par priorité
       case "$item_priority" in
         P0) count_p0=$((count_p0 + 1)) ;;
         P1) count_p1=$((count_p1 + 1)) ;;
@@ -617,7 +576,6 @@ cmd_roadmap() {
       esac
       count_total=$((count_total + 1))
 
-      # Stocker pour tri : priority|effort_key|status|file|id|title|priority_raw|type|effort|tags|epic
       local ekey
       ekey=$(effort_sort_key "$item_effort")
       items_data+="${item_priority}|${ekey}|${status_dir}|${item_file}|${item_id}|${item_title}|${item_priority}|${item_type}|${item_effort}|${item_tags}|${item_epic}"$'\n'
@@ -629,23 +587,19 @@ cmd_roadmap() {
     return
   fi
 
-  # Header
   echo ""
-  printf "${BOLD}ROADMAP — autonome-agent${NC}"
+  printf "${BOLD}ROADMAP — orc${NC}"
   printf "         ${RED}P0: %d${NC} | ${YELLOW}P1: %d${NC} | ${BLUE}P2: %d${NC} | ${DIM}P3: %d${NC}\n" \
     "$count_p0" "$count_p1" "$count_p2" "$count_p3"
   printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
-  # Trier les items
   local sorted_items
   sorted_items=$(echo "$items_data" | grep -v '^$' | sort_items)
 
-  # Afficher par statut
   local current_status=""
   while IFS='|' read -r _prio _ekey status filepath item_id item_title priority item_type effort tags epic; do
     [ -z "$status" ] && continue
 
-    # Nouveau groupe de statut
     if [ "$status" != "$current_status" ]; then
       current_status="$status"
       local status_label count_in_status
@@ -661,18 +615,14 @@ cmd_roadmap() {
       printf " ${BOLD}%s${NC} (%d)\n" "$status_label" "$count_in_status"
     fi
 
-    # Symbole et couleur
     local sym pcolor
     sym=$(status_symbol "$status")
     pcolor=$(priority_color "$priority")
 
-    # === Niveau COMPACT ===
     printf "  %b ${pcolor}%-12s${NC} [%s/%s] %-42s ${DIM}%s${NC}\n" \
       "$sym" "$item_id" "$priority" "$effort" "$item_title" "$tags"
 
-    # === Niveau DETAIL ===
     if [ "$verbosity" = "detail" ] || [ "$verbosity" = "full" ]; then
-      # Contexte (3 premières lignes)
       local context
       context=$(extract_section "$filepath" "Contexte" 3)
       if [ -n "$context" ]; then
@@ -681,19 +631,16 @@ cmd_roadmap() {
         done
       fi
 
-      # Dépendances
       local deps
       deps=$(parse_depends "$filepath")
       if [ -n "$deps" ] && [ "$deps" != "[]" ]; then
         printf "    ${DIM}Dépend de : %s${NC}\n" "$deps"
       fi
 
-      # Epic
       if [ -n "$epic" ] && [ "$epic" != '""' ]; then
         printf "    ${DIM}Epic : %s${NC}\n" "$epic"
       fi
 
-      # Dates
       local created updated
       created=$(parse_frontmatter "$filepath" "created")
       updated=$(parse_frontmatter "$filepath" "updated")
@@ -703,9 +650,7 @@ cmd_roadmap() {
       echo ""
     fi
 
-    # === Niveau FULL ===
     if [ "$verbosity" = "full" ]; then
-      # Spécification complète
       local spec
       spec=$(extract_section "$filepath" "Spécification")
       if [ -n "$spec" ]; then
@@ -716,7 +661,6 @@ cmd_roadmap() {
         echo ""
       fi
 
-      # Critères de validation
       local criteria
       criteria=$(extract_section "$filepath" "Critères de validation")
       if [ -n "$criteria" ]; then
@@ -727,7 +671,6 @@ cmd_roadmap() {
         echo ""
       fi
 
-      # Notes
       local notes
       notes=$(extract_section "$filepath" "Notes")
       if [ -n "$notes" ]; then
@@ -742,7 +685,6 @@ cmd_roadmap() {
 
   echo ""
 
-  # Filtres actifs
   local active_filters=""
   [ -n "$filter_priority" ] && active_filters+="priority=$filter_priority "
   [ -n "$filter_tag" ] && active_filters+="tag=$filter_tag "
@@ -756,11 +698,11 @@ cmd_roadmap() {
 
 cmd_roadmap_help() {
   echo ""
-  printf "${BOLD}agent roadmap — Suivi de la roadmap${NC}\n"
+  printf "${BOLD}orc roadmap — Suivi de la roadmap${NC}\n"
   echo ""
-  printf "  ${CYAN}agent roadmap${NC}                    Vue compacte\n"
-  printf "  ${CYAN}agent roadmap --detail${NC}            Vue détaillée (contexte, dépendances)\n"
-  printf "  ${CYAN}agent roadmap --full${NC}              Vue exhaustive (specs, critères)\n"
+  printf "  ${CYAN}orc roadmap${NC}                      Vue compacte\n"
+  printf "  ${CYAN}orc roadmap --detail${NC}              Vue détaillée (contexte, dépendances)\n"
+  printf "  ${CYAN}orc roadmap --full${NC}                Vue exhaustive (specs, critères)\n"
   echo ""
   printf "  ${BOLD}Filtres :${NC}\n"
   printf "  ${CYAN}--priority P0|P1|P2|P3${NC}           Par priorité\n"
@@ -769,67 +711,48 @@ cmd_roadmap_help() {
   printf "  ${CYAN}--type <type>${NC}                    Par type (feature, bugfix, etc.)\n"
   printf "  ${CYAN}--status <status>${NC}                Par statut (planned, in-progress, etc.)\n"
   echo ""
-  printf "  ${DIM}Filtres combinables : agent roadmap --priority P1 --tag adoption${NC}\n"
+  printf "  ${DIM}Filtres combinables : orc roadmap --priority P1 --tag adoption${NC}\n"
   echo ""
 }
 
 # ============================================================
-# COMMANDE : update
+# COMMANDE : help agent
 # ============================================================
 
-cmd_update() {
-  printf "${BOLD}Mise à jour du template...${NC}\n"
-
-  if [ -d "$TEMPLATE_DIR/.git" ]; then
-    git -C "$TEMPLATE_DIR" pull --ff-only
-    printf "${GREEN}Template mis à jour.${NC}\n"
-    printf "${DIM}Note : les workspaces existants ne sont pas affectés.${NC}\n"
-  else
-    die "$TEMPLATE_DIR n'est pas un repo git."
-  fi
-}
-
-# ============================================================
-# COMMANDE : help
-# ============================================================
-
-cmd_help() {
+cmd_agent_help() {
   echo ""
-  printf "${BOLD}Autonome Agent — CLI${NC}\n"
+  printf "${BOLD}orc agent — Gestion des projets${NC}\n"
   echo ""
-  printf "  ${CYAN}agent new <nom>${NC}                     Créer un projet\n"
-  printf "  ${CYAN}agent new <nom> --brief briefs/x.md${NC} Avec un brief existant\n"
-  printf "  ${CYAN}agent start <nom>${NC}                   Lancer en background\n"
-  printf "  ${CYAN}agent stop <nom>${NC}                    Arrêter proprement\n"
-  printf "  ${CYAN}agent restart <nom>${NC}                 Redémarrer\n"
-  printf "  ${CYAN}agent status${NC}                        Vue d'ensemble\n"
-  printf "  ${CYAN}agent status <nom>${NC}                  Détail d'un projet\n"
-  printf "  ${CYAN}agent logs <nom>${NC}                    Logs temps réel\n"
-  printf "  ${CYAN}agent logs <nom> --full${NC}             Log complet\n"
-  printf "  ${CYAN}agent roadmap${NC}                       Roadmap compacte\n"
-  printf "  ${CYAN}agent roadmap --detail${NC}              Roadmap détaillée\n"
-  printf "  ${CYAN}agent roadmap --full${NC}                Roadmap exhaustive\n"
-  printf "  ${CYAN}agent update${NC}                        Mettre à jour le template\n"
-  printf "  ${CYAN}agent help${NC}                          Cette aide\n"
+  printf "  ${CYAN}orc agent new <nom>${NC}               Créer un projet\n"
+  printf "  ${CYAN}orc agent new <nom> --brief x.md${NC}  Avec un brief existant\n"
+  printf "  ${CYAN}orc agent start <nom>${NC}             Lancer en background\n"
+  printf "  ${CYAN}orc agent stop <nom>${NC}              Arrêter proprement\n"
+  printf "  ${CYAN}orc agent restart <nom>${NC}           Redémarrer\n"
+  printf "  ${CYAN}orc agent status${NC}                  Vue d'ensemble\n"
+  printf "  ${CYAN}orc agent status <nom>${NC}            Détail d'un projet\n"
+  printf "  ${CYAN}orc agent logs <nom>${NC}              Logs temps réel\n"
+  printf "  ${CYAN}orc agent logs <nom> --full${NC}       Log complet\n"
+  printf "  ${CYAN}orc agent update${NC}                  Mettre à jour le template\n"
   echo ""
 }
 
 # ============================================================
-# DISPATCH
+# DISPATCH AGENT
 # ============================================================
 
-COMMAND="${1:-help}"
-shift || true
+agent_dispatch() {
+  local subcmd="${1:-help}"
+  shift || true
 
-case "$COMMAND" in
-  new)     cmd_new "$@" ;;
-  start)   cmd_start "$@" ;;
-  stop)    cmd_stop "$@" ;;
-  restart) cmd_restart "$@" ;;
-  status)  cmd_status "$@" ;;
-  logs)    cmd_logs "$@" ;;
-  roadmap) cmd_roadmap "$@" ;;
-  update)  cmd_update ;;
-  help|-h|--help) cmd_help ;;
-  *) die "Commande inconnue : $COMMAND. Voir : agent help" ;;
-esac
+  case "$subcmd" in
+    new)     cmd_new "$@" ;;
+    start)   cmd_start "$@" ;;
+    stop)    cmd_stop "$@" ;;
+    restart) cmd_restart "$@" ;;
+    status)  cmd_status "$@" ;;
+    logs)    cmd_logs "$@" ;;
+    update)  cmd_update ;;
+    help|-h|--help) cmd_agent_help ;;
+    *) die "Commande inconnue : agent $subcmd. Voir : orc agent help" ;;
+  esac
+}

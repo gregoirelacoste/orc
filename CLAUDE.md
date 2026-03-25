@@ -16,12 +16,21 @@ Autonome Agent est un **meta-outil** : un orchestrateur bash qui pilote Claude C
 ## Architecture
 
 ```
-autonome-agent/              ← CE REPO (template, jamais modifié par un projet)
+orc/                         ← CE REPO (template, jamais modifié par un projet)
+├── orc.sh                   ← CLI unifiée : point d'entrée unique (orc agent|roadmap|admin)
+├── orc-agent.sh             ← Sous-commandes projets (new, start, stop, status, logs, roadmap)
+├── orc-admin.sh             ← Sous-commandes admin (config, model, budget, key, version)
 ├── orchestrator.sh          ← Boucle principale : bootstrap → research → strategy → feature loop → evolve
+├── agent.sh                 ← CLI legacy (compatibilité, redirige vers orc)
 ├── init.sh                  ← Wizard interactif : crée un workspace SÉPARÉ (../mon-projet/)
 ├── config.default.sh        ← Template de config (copié et personnalisé par init.sh)
 ├── phases/                  ← Prompts Markdown avec placeholders {{VAR}} pour chaque phase
 ├── skills-templates/        ← Skills copiées dans project/.claude/skills/ au bootstrap
+├── roadmap/                 ← Items de roadmap structurés (backlog → planned → in-progress → done)
+│   ├── backlog/             ← Idées non priorisées
+│   ├── planned/             ← Priorisées, prêtes à implémenter
+│   ├── in-progress/         ← En cours de développement
+│   └── done/                ← Terminées
 ├── BRIEF.template.md        ← Template de brief produit
 ├── ARCHITECTURE.md          ← Documentation complète du système
 └── README.md                ← Mode d'emploi
@@ -31,16 +40,29 @@ autonome-agent/              ← CE REPO (template, jamais modifié par un proje
 ```
 ../mon-projet/               ← Auto-contenu, indépendant du template
 ├── orchestrator.sh          ← Copie
-├── config.sh                ← Personnalisé
 ├── BRIEF.md                 ← Brief produit
 ├── phases/, skills-templates/
-├── logs/                    ← Logs orchestrateur + tokens.json + state.json
+├── .orc/                    ← État orchestrateur (partiellement gitté)
+│   ├── config.sh            ← Personnalisé (gitté)
+│   ├── state.json           ← Runtime (ignoré)
+│   ├── tokens.json          ← Coûts (ignoré)
+│   ├── .lock                ← Lockfile (ignoré)
+│   ├── .pid                 ← PID du process (ignoré)
+│   └── logs/                ← Logs orchestrateur (ignoré)
 └── project/                 ← Code produit (son propre git)
 ```
 
 ## Commandes
 
+### CLI unifiée (`orc`)
+- `orc agent new|start|stop|status|logs <nom>` — gestion des projets
+- `orc roadmap [--detail|--full] [--priority P1] [--tag x]` — suivi roadmap
+- `orc admin config|model|budget|key|version` — administration
+- `orc s` / `orc r` / `orc l <nom>` — raccourcis (status, roadmap, logs)
+
+### Développement
 - `bash -n orchestrator.sh` — vérifier la syntaxe sans exécuter
+- `bash -n orc.sh && bash -n orc-agent.sh && bash -n orc-admin.sh` — vérifier toute la CLI
 - `shellcheck orchestrator.sh` — lint statique (si shellcheck installé)
 - Pas de test framework — la validation se fait par dry-run sur un projet réel
 
@@ -51,9 +73,10 @@ autonome-agent/              ← CE REPO (template, jamais modifié par un proje
 - **printf > echo -e** : pour la portabilité des couleurs
 - **Chemins absolus** : `PROJECT_DIR` et `LOG_DIR` résolus au démarrage via `realpath`
 - **Dégradation gracieuse** : si `jq` absent, le tracking tokens est désactivé (pas de crash)
-- **Lockfile** : `.orchestrator.lock` avec PID pour empêcher l'exécution concurrente
+- **Lockfile** : `.orc/.lock` avec PID pour empêcher l'exécution concurrente
 - **Signal handling** : trap `EXIT INT TERM` pour cleanup (kill Claude, rm temp files, save state)
-- **State persistence** : `state.json` sauvegardé après chaque feature pour reprise après crash
+- **State persistence** : `.orc/state.json` sauvegardé après chaque feature pour reprise après crash
+- **Dossier `.orc/`** : tout l'état orchestrateur (config, state, tokens, logs, lock, pid) est centralisé dans `.orc/`
 
 ## Règles de modification
 
@@ -74,6 +97,19 @@ Substitue `{{VAR}}` dans les prompts. Attention : la substitution bash `${conten
 
 ### Reprise après crash
 Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe ? → skip research. Features non-cochées dans ROADMAP ? → skip strategy. `state.json` → restaure les compteurs.
+
+## Roadmap
+
+Les items de roadmap sont des fichiers `.md` individuels dans `roadmap/`.
+Le statut est déterminé par le sous-dossier (`backlog/`, `planned/`, `in-progress/`, `done/`).
+
+Chaque item a un frontmatter YAML avec : `id`, `priority` (P0-P3), `type`, `effort` (XS-XL), `tags`, `epic`, `depends`.
+
+- **Consulter** : `agent roadmap` (compact), `--detail`, `--full`
+- **Filtrer** : `--priority P1`, `--tag adoption`, `--epic adopt-mode`
+- **Créer un item** : copier `roadmap/TEMPLATE.md`, incrémenter l'ID
+- **Changer de statut** : `mv roadmap/planned/ROADMAP-NNN.md roadmap/in-progress/`
+- **Skill** : `skills-templates/roadmap-item.md` guide la création pendant les rétrospectives
 
 ## Version actuelle
 
