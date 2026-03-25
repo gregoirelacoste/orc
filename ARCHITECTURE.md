@@ -390,11 +390,12 @@ Le dossier `learnings/` dans le template accumule les apprentissages :
 
 ### Connaissance projet vivante (CODEBASE.md + stack-conventions.md)
 
-**codebase/ — index sémantique + fichiers de détail** (système DB-like)
+**codebase/ — index sémantique + fichiers de détail + auto-map** (système DB-like)
 
 ```
 codebase/
 ├── INDEX.md          ← carte sémantique (max 40 lignes), lu TOUJOURS
+├── auto-map.md       ← carte auto-générée par l'orchestrateur (vérité du code)
 ├── modules.md        ← fonctions, classes, composants par dossier
 ├── utilities.md      ← helpers réutilisables avec signature et chemin
 ├── integrations.md   ← APIs, services tiers, config, erreurs
@@ -403,13 +404,18 @@ codebase/
 └── security.md       ← patterns de sécurité validés, vérifications faites
 ```
 
-**Principe** : l'INDEX.md est la seule entrée obligatoire. Il dit CE QUI EXISTE
-et OÙ TROUVER LE DÉTAIL. L'IA ne lit que les fichiers de détail pertinents pour
-la feature en cours → économie de contexte massive à mesure que le projet grossit.
+**Deux sources de vérité complémentaires :**
+- `auto-map.md` : **vérité du code** — généré par grep avant chaque feature. Multi-stack
+  (TS/JS, Python, Java, Go, Astro). L'IA ne le modifie jamais.
+- `INDEX.md` : **vérité sémantique** — maintenu par l'IA, enrichi d'annotations,
+  justifications, liens entre modules. Max 40 lignes.
 
-**Gain estimé** : à la feature 30, un CODEBASE.md monolithique ferait ~500 lignes
-(~2000 tokens chargés à chaque invocation). Avec l'index, l'IA charge ~40 lignes
-d'index + ~50 lignes du fichier de détail pertinent = ~360 tokens au lieu de ~2000.
+**Principe** : l'IA lit l'auto-map (ce qui existe) + l'index (pourquoi ça existe),
+puis pioche le fichier de détail pertinent. Elle ne charge jamais tout.
+
+**Gain estimé** : à la feature 30, un fichier monolithique ferait ~500 lignes
+(~2000 tokens). Avec le système indexé, l'IA charge ~40 lignes d'index + ~100
+lignes d'auto-map tronqué + ~50 lignes de détail = ~760 tokens au lieu de ~2000.
 
 **stack-conventions.md** — skill auto-enrichie, spécifique à la stack du projet :
 - Conventions de code adoptées (nommage, structure, patterns)
@@ -418,10 +424,35 @@ d'index + ~50 lignes du fichier de détail pertinent = ~360 tokens au lieu de ~2
 - Patterns de sécurité validés
 - Optimisations de performance appliquées
 
-Le cycle : implement consulte l'index → lit le détail pertinent → reflect enrichit
-le détail + met à jour l'index → implement suivant consulte l'index → ...
-L'effet cumulatif fait que l'IA duplique de moins en moins, respecte de mieux
-en mieux les conventions, et consomme moins de contexte au fil des features.
+Le cycle : implement consulte l'index + auto-map → lit le détail pertinent →
+reflect enrichit le détail + vérifie vs auto-map → implement suivant consulte → ...
+
+### Réflexions structurées (pattern Reflexion)
+
+Inspiré du papier Reflexion (2023). Après chaque échec dans le test-fix loop,
+l'IA écrit une réflexion structurée dans `logs/fix-reflections-N.md` :
+- **Ce que j'ai tenté** — l'approche choisie
+- **Pourquoi ça a échoué** — cause racine identifiée
+- **Ce que je dois essayer** — nouvelle approche concrète
+
+Ces réflexions sont injectées dans les tentatives de fix suivantes. L'IA ne
+refait pas les mêmes erreurs parce qu'elle a **le raisonnement** de ses échecs
+passés, pas juste le hash de l'erreur.
+
+### Contexte adaptatif par phase
+
+Inspiré de GITM et ACE. Chaque phase reçoit un **contexte différent** au lieu
+du même blob global. `run_claude()` injecte un "context hint" selon la phase :
+
+| Phase | Contexte injecté |
+|---|---|
+| **implement** | INDEX.md + auto-map.md + fichiers de détail pertinents + stack-conventions.md |
+| **fix** | auto-map.md + security.md + réflexions passées |
+| **strategy** | INDEX.md + architecture.md + research/INDEX.md |
+| **reflect** | auto-map.md (vérité) + INDEX.md + fichiers de détail à mettre à jour |
+| **meta-retro** | INDEX.md + auto-map.md + audit complet de cohérence |
+
+L'IA charge ~200 tokens de contexte pertinent au lieu de ~2000 tokens de tout.
 
 ---
 

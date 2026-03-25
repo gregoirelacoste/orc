@@ -19,6 +19,10 @@ Mets à jour les fichiers de détail dans `codebase/` avec ce que tu as créé/m
 Format pour chaque entrée dans les fichiers de détail :
 `- nom() dans chemin/fichier.ext — description courte de ce que ça fait`
 
+Vérifie **codebase/auto-map.md** (généré automatiquement par l'orchestrateur) :
+- Compare-le avec tes fichiers de détail — y a-t-il des exports non documentés ?
+- Si oui, ajoute-les dans le fichier de détail approprié
+
 Puis mets à jour **codebase/INDEX.md** :
 - Ajoute/modifie le résumé d'une phrase par section impactée
 - L'index doit rester COMPACT (max 40 lignes)

@@ -114,8 +114,20 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe
 
 ### Connaissance projet (codebase/ + stack-conventions.md)
 - `codebase/INDEX.md` : carte sémantique du projet (max 40 lignes). Lu AVANT chaque implémentation. Pointe vers les fichiers de détail.
+- `codebase/auto-map.md` : carte auto-générée par l'orchestrateur (grep des exports/classes). Vérité du code, pas maintenue par l'IA. Regénérée avant chaque feature.
 - `codebase/modules.md`, `utilities.md`, `integrations.md`, `data-models.md`, `architecture.md`, `security.md` : détail par domaine. L'IA ne lit que les fichiers pertinents pour la feature en cours.
 - `.claude/skills/stack-conventions.md` : conventions spécifiques à la stack (React, Astro, Java, etc.), patterns adoptés, anti-patterns, utilities réutilisables, patterns de sécurité. Auto-enrichi au fil du projet.
+
+### Réflexions structurées (pattern Reflexion)
+Après chaque échec de fix, l'IA écrit une réflexion structurée dans `logs/fix-reflections-N.md` (ce que j'ai tenté, pourquoi ça a échoué, ce que je dois essayer). Ces réflexions sont injectées dans les tentatives suivantes.
+
+### Contexte adaptatif par phase
+`run_claude()` injecte un contexte différent selon la phase :
+- implement → INDEX.md + auto-map.md + fichiers de détail pertinents + stack-conventions.md
+- fix → auto-map.md + security.md + réflexions passées
+- strategy → INDEX.md + architecture.md + research/INDEX.md
+- reflect → auto-map.md (vérité) + INDEX.md + fichiers de détail à mettre à jour
+- meta-retro → INDEX.md + auto-map.md + audit de cohérence de tous les fichiers
 
 ## Roadmap
 

@@ -12,12 +12,15 @@ FEATURE À IMPLÉMENTER : {{FEATURE_NAME}}
    - `codebase/architecture.md` si tu dois comprendre un choix technique
    - `codebase/security.md` si la feature a un aspect sécurité
    **NE LIS PAS tous les fichiers — uniquement ceux pertinents pour cette feature.**
-2. **.claude/skills/stack-conventions.md** — les conventions de la stack.
+2. **codebase/auto-map.md** — la carte auto-générée des exports et classes du code.
+   C'est la VÉRITÉ du code (généré par l'orchestrateur, pas par l'IA).
+   Utilise-le pour localiser rapidement les modules et fonctions existants.
+3. **.claude/skills/stack-conventions.md** — les conventions de la stack.
    Respecte-les. Si un anti-pattern est listé, ne le fais PAS.
-3. Le code existant lié à cette feature
-4. research/INDEX.md pour le contexte marché
-5. La spec de cette feature dans ROADMAP.md
-6. Les insights concurrents dans research/competitors/SYNTHESIS.md
+4. Le code existant lié à cette feature
+5. research/INDEX.md pour le contexte marché
+6. La spec de cette feature dans ROADMAP.md
+7. Les insights concurrents dans research/competitors/SYNTHESIS.md
 
 ### Anti-duplication — checklist AVANT de créer du code
 

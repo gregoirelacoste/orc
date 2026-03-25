@@ -265,7 +265,49 @@ run_claude() {
   log INFO "→ Claude lancé [phase=$phase_name] [max_turns=$max_turns]..."
 
   # Préfixe : forcer Claude à rester dans le répertoire projet
+  # + contexte adaptatif : indiquer quels fichiers de connaissance consulter selon la phase
+  local context_hint=""
+  case "$phase_name" in
+    implement)
+      context_hint="
+CONTEXTE PROJET — Lis dans cet ordre :
+1. codebase/INDEX.md (carte sémantique — TOUJOURS lire en premier)
+2. codebase/auto-map.md (carte auto-générée des exports — vérité du code)
+3. Les fichiers de détail codebase/*.md pertinents pour cette feature (PAS tous)
+4. .claude/skills/stack-conventions.md (conventions à respecter)"
+      ;;
+    fix)
+      context_hint="
+CONTEXTE PROJET — Lis si pertinent :
+1. codebase/auto-map.md (pour localiser les modules impliqués)
+2. codebase/security.md (si l'erreur est liée à la sécurité)
+3. .claude/skills/fix-tests.md (workflow de correction)"
+      ;;
+    strategy)
+      context_hint="
+CONTEXTE PROJET — Lis dans cet ordre :
+1. codebase/INDEX.md (état actuel du projet)
+2. codebase/architecture.md (décisions techniques en place)
+3. research/INDEX.md (insights marché)"
+      ;;
+    reflect)
+      context_hint="
+CONTEXTE PROJET — Mets à jour :
+1. codebase/auto-map.md est déjà à jour (auto-généré) — lis-le pour vérifier
+2. codebase/INDEX.md + les fichiers de détail impactés par cette feature
+3. .claude/skills/stack-conventions.md si nouveaux patterns"
+      ;;
+    meta-retro)
+      context_hint="
+CONTEXTE PROJET — Auditer :
+1. codebase/INDEX.md — est-il à jour vs auto-map.md ?
+2. codebase/auto-map.md — vérité du code actuel
+3. Tous les fichiers codebase/*.md — vérifier la cohérence avec le code réel"
+      ;;
+  esac
+
   local full_prompt="IMPORTANT: Tu travailles dans le répertoire courant ($(basename "$PROJECT_DIR")/). Tous les fichiers que tu crées ou modifies doivent être dans ce répertoire. Ne navigue JAMAIS vers un répertoire parent (..) et n'utilise PAS de chemins absolus vers des dossiers parents.
+${context_hint}
 
 $prompt"
 
@@ -549,6 +591,144 @@ run_quality_gate() {
 
   log INFO "Quality gate OK."
   return 0
+}
+
+# === AUTO REPO MAP ===
+# Génère automatiquement une carte des symboles du projet.
+# Inspiré du "repo map" d'Aider (tree-sitter), version bash/grep.
+# Résultat : codebase/auto-map.md — vérité du code, pas maintenu par l'IA.
+
+generate_repo_map() {
+  local project_dir="$1"
+  local map_file="$project_dir/codebase/auto-map.md"
+
+  mkdir -p "$project_dir/codebase"
+
+  {
+    echo "# Auto-generated Repo Map"
+    echo "> Généré automatiquement — NE PAS modifier à la main."
+    echo "> Dernière mise à jour : $(date '+%Y-%m-%d %H:%M:%S')"
+    echo ""
+
+    # Détecter la stack par les fichiers présents
+    local has_ts=false has_js=false has_py=false has_java=false has_go=false has_astro=false
+
+    compgen -G "$project_dir/src/**/*.ts" > /dev/null 2>&1 && has_ts=true
+    compgen -G "$project_dir/src/**/*.tsx" > /dev/null 2>&1 && has_ts=true
+    compgen -G "$project_dir/**/*.astro" > /dev/null 2>&1 && has_astro=true
+    compgen -G "$project_dir/src/**/*.js" > /dev/null 2>&1 && has_js=true
+    compgen -G "$project_dir/src/**/*.jsx" > /dev/null 2>&1 && has_js=true
+    compgen -G "$project_dir/**/*.py" > /dev/null 2>&1 && has_py=true
+    compgen -G "$project_dir/src/**/*.java" > /dev/null 2>&1 && has_java=true
+    compgen -G "$project_dir/**/*.go" > /dev/null 2>&1 && has_go=true
+
+    # TypeScript / JavaScript
+    if [ "$has_ts" = true ] || [ "$has_js" = true ]; then
+      echo "## Exports TypeScript/JavaScript"
+      echo ""
+      find "$project_dir/src" -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) \
+        ! -path "*/node_modules/*" ! -path "*/.next/*" ! -path "*/dist/*" ! -name "*.test.*" ! -name "*.spec.*" \
+        2>/dev/null | sort | while read -r f; do
+        local rel_path="${f#$project_dir/}"
+        local exports
+        exports=$(grep -E "^export (default )?(function|class|const|interface|type|enum) " "$f" 2>/dev/null || true)
+        if [ -n "$exports" ]; then
+          echo "### $rel_path"
+          echo "$exports" | sed 's/^/- /' | head -20
+          echo ""
+        fi
+      done
+    fi
+
+    # Astro
+    if [ "$has_astro" = true ]; then
+      echo "## Pages & Components Astro"
+      echo ""
+      find "$project_dir/src" -type f -name "*.astro" 2>/dev/null | sort | while read -r f; do
+        local rel_path="${f#$project_dir/}"
+        echo "- $rel_path"
+      done
+      echo ""
+    fi
+
+    # Python
+    if [ "$has_py" = true ]; then
+      echo "## Modules Python"
+      echo ""
+      find "$project_dir" -type f -name "*.py" \
+        ! -path "*/venv/*" ! -path "*/__pycache__/*" ! -path "*/migrations/*" ! -name "test_*" \
+        2>/dev/null | sort | while read -r f; do
+        local rel_path="${f#$project_dir/}"
+        local exports
+        exports=$(grep -E "^(class |def |async def )" "$f" 2>/dev/null || true)
+        if [ -n "$exports" ]; then
+          echo "### $rel_path"
+          echo "$exports" | sed 's/^/- /' | head -20
+          echo ""
+        fi
+      done
+    fi
+
+    # Java
+    if [ "$has_java" = true ]; then
+      echo "## Classes Java"
+      echo ""
+      find "$project_dir/src" -type f -name "*.java" ! -name "*Test.java" \
+        2>/dev/null | sort | while read -r f; do
+        local rel_path="${f#$project_dir/}"
+        local exports
+        exports=$(grep -E "^public (class|interface|enum|record) " "$f" 2>/dev/null || true)
+        if [ -n "$exports" ]; then
+          echo "### $rel_path"
+          echo "$exports" | sed 's/^/- /' | head -10
+          echo ""
+        fi
+      done
+    fi
+
+    # Go
+    if [ "$has_go" = true ]; then
+      echo "## Packages Go"
+      echo ""
+      find "$project_dir" -type f -name "*.go" ! -name "*_test.go" \
+        2>/dev/null | sort | while read -r f; do
+        local rel_path="${f#$project_dir/}"
+        local exports
+        exports=$(grep -E "^func [A-Z]|^type [A-Z]" "$f" 2>/dev/null || true)
+        if [ -n "$exports" ]; then
+          echo "### $rel_path"
+          echo "$exports" | sed 's/^/- /' | head -20
+          echo ""
+        fi
+      done
+    fi
+
+    # Routes / API endpoints
+    local api_files
+    api_files=$(find "$project_dir/src" -type f \( -path "*/api/*" -o -path "*/routes/*" -o -path "*/pages/api/*" \) \
+      ! -path "*/node_modules/*" 2>/dev/null | sort)
+    if [ -n "$api_files" ]; then
+      echo "## API Routes"
+      echo ""
+      echo "$api_files" | while read -r f; do
+        echo "- ${f#$project_dir/}"
+      done
+      echo ""
+    fi
+
+  } > "$map_file" 2>/dev/null
+
+  # Tronquer si trop long (max 200 lignes)
+  local line_count
+  line_count=$(wc -l < "$map_file")
+  if [ "$line_count" -gt 200 ]; then
+    head -200 "$map_file" > "${map_file}.tmp"
+    echo "" >> "${map_file}.tmp"
+    echo "> Tronqué à 200 lignes ($line_count au total)" >> "${map_file}.tmp"
+    mv "${map_file}.tmp" "$map_file"
+  fi
+
+  log INFO "Repo map généré : $map_file ($line_count lignes)"
 }
 
 # Pause pour intervention humaine
@@ -847,7 +1027,10 @@ EOF
     }
   fi
 
-  # --- Implémentation (avec human notes + feedback de la feature précédente) ---
+  # --- Auto repo map (avant chaque feature) ---
+  generate_repo_map "$PROJECT_DIR"
+
+  # --- Implémentation (avec human notes + feedback + contexte adaptatif) ---
   log INFO "Implémentation en cours..."
   impl_prompt=$(render_phase "03-implement.md" \
     "FEATURE_NAME=$feature_name" \
@@ -910,12 +1093,42 @@ $(cat "$prev_feedback")"
         log ERROR "Même erreur détectée 3 fois — boucle de fix, abandon de la feature."
         notify "Feature '$feature_name' bloquée : même erreur en boucle (3x)"
         break
-      elif [ "$same_error_count" -eq 1 ]; then
-        # Même erreur 2x → prompt d'approche différente
-        log WARN "Même erreur détectée 2 fois — changement d'approche..."
-        fix_prompt=$(write_fix_prompt "$attempt" "$MAX_FIX_ATTEMPTS" \
-          "$BUILD_EXIT" "${BUILD_OUTPUT: -3000}" \
-          "$TEST_EXIT" "${TEST_OUTPUT: -3000}")
+      fi
+
+      # Réflexion structurée (pattern Reflexion) : l'IA écrit ce qu'elle a tenté et pourquoi ça a échoué
+      local reflection_file="$PROJECT_DIR/logs/fix-reflections-$FEATURE_COUNT.md"
+      run_claude "Tu viens d'essayer de corriger la feature '$feature_name' (tentative $attempt/$MAX_FIX_ATTEMPTS) et ça a échoué.
+
+BUILD (exit $BUILD_EXIT):
+${BUILD_OUTPUT: -1500}
+
+TESTS (exit $TEST_EXIT):
+${TEST_OUTPUT: -1500}
+
+Écris une RÉFLEXION STRUCTURÉE (3-5 lignes max) dans ce format :
+- **Ce que j'ai tenté :** [description de l'approche]
+- **Pourquoi ça a échoué :** [cause racine identifiée]
+- **Ce que je dois essayer :** [nouvelle approche concrète]
+
+Écris cette réflexion dans le fichier logs/fix-reflections-$FEATURE_COUNT.md (append).
+Ne modifie PAS le code dans cette étape — uniquement la réflexion." \
+        5 "$LOG_DIR/feature-$FEATURE_COUNT-reflection-$attempt.log" "reflection" "$feature_name" || true
+
+      # Construire le prompt de fix avec les réflexions passées
+      fix_prompt=$(write_fix_prompt "$attempt" "$MAX_FIX_ATTEMPTS" \
+        "$BUILD_EXIT" "${BUILD_OUTPUT: -3000}" \
+        "$TEST_EXIT" "${TEST_OUTPUT: -3000}")
+
+      # Injecter les réflexions passées
+      if [ -f "$reflection_file" ]; then
+        fix_prompt="$fix_prompt
+
+RÉFLEXIONS DES TENTATIVES PRÉCÉDENTES (en tenir compte pour ne PAS refaire les mêmes erreurs) :
+$(cat "$reflection_file")"
+      fi
+
+      if [ "$same_error_count" -eq 1 ]; then
+        # Même erreur 2x → renforcer le changement d'approche
         fix_prompt="$fix_prompt
 
 ATTENTION : cette erreur est IDENTIQUE à la tentative précédente.
@@ -923,14 +1136,12 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
 1. Repenser l'architecture de cette partie du code
 2. Essayer une approche radicalement différente
 3. Ne PAS réappliquer la même correction"
-        run_claude "$fix_prompt" 30 "$LOG_DIR/feature-$FEATURE_COUNT-fix-$attempt.log" "fix" "$feature_name"
+        log WARN "Même erreur détectée 2 fois — changement d'approche..."
       else
         log WARN "Échec — correction en cours (tentative $attempt)..."
-        fix_prompt=$(write_fix_prompt "$attempt" "$MAX_FIX_ATTEMPTS" \
-          "$BUILD_EXIT" "${BUILD_OUTPUT: -3000}" \
-          "$TEST_EXIT" "${TEST_OUTPUT: -3000}")
-        run_claude "$fix_prompt" 30 "$LOG_DIR/feature-$FEATURE_COUNT-fix-$attempt.log" "fix" "$feature_name"
       fi
+
+      run_claude "$fix_prompt" 30 "$LOG_DIR/feature-$FEATURE_COUNT-fix-$attempt.log" "fix" "$feature_name"
     fi
   done
 
