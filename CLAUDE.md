@@ -1,4 +1,6 @@
-# CLAUDE.md — Autonome Agent
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Projet
 
@@ -8,10 +10,10 @@ Autonome Agent est un **meta-outil** : un orchestrateur bash qui pilote Claude C
 
 - **Bash** (bash 5+) — orchestrateur principal (`orchestrator.sh`, `init.sh`)
 - **Markdown** — prompts des phases (`phases/*.md`), skills (`skills-templates/*.md`)
-- **JSON** — tracking tokens (`logs/tokens.json`), état (`logs/state.json`)
+- **JSON** — tracking tokens (`.orc/tokens.json`), état (`.orc/state.json`)
 - **jq** — parsing JSON (dépendance optionnelle, dégradation gracieuse si absent)
 - **Claude Code CLI** — `claude -p` en mode non-interactif avec `--dangerously-skip-permissions`
-- **GitHub CLI** (`gh`) — création de repos dans `init.sh`
+- **GitHub CLI** (`gh`) — optionnel, pour création de repos et intégration GitHub
 
 ## Architecture
 
@@ -20,20 +22,20 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 ├── orc.sh                   ← CLI unifiée : point d'entrée unique (orc agent|roadmap|admin)
 ├── orc-agent.sh             ← Sous-commandes projets (new, start, stop, status, logs, roadmap)
 ├── orc-admin.sh             ← Sous-commandes admin (config, model, budget, key, version)
-├── orchestrator.sh          ← Boucle principale : bootstrap → research → strategy → feature loop → evolve
+├── orchestrator.sh          ← Boucle principale (2100+ lignes) : bootstrap → research → strategy → feature loop → evolve
 ├── agent.sh                 ← CLI legacy (compatibilité, redirige vers orc)
 ├── init.sh                  ← Wizard interactif : crée un workspace SÉPARÉ (../mon-projet/)
+├── deploy.sh                ← Script d'installation VPS (Ubuntu 22+ / Debian 12+, idempotent)
 ├── config.default.sh        ← Template de config (copié et personnalisé par init.sh)
-├── phases/                  ← Prompts Markdown avec placeholders {{VAR}} pour chaque phase
+├── phases/                  ← Prompts Markdown avec placeholders {{VAR}} pour chaque phase (00-07)
 ├── skills-templates/        ← Skills copiées dans project/.claude/skills/ au bootstrap
+├── codebase/                ← Documentation structurée du système orc lui-même (INDEX.md, functions.md, etc.)
+├── learnings/               ← Insights inter-projets, copiés au bootstrap, lus par phase 00
+├── briefs/                  ← Exemples de briefs produit
 ├── roadmap/                 ← Items de roadmap structurés (backlog → planned → in-progress → done)
-│   ├── backlog/             ← Idées non priorisées
-│   ├── planned/             ← Priorisées, prêtes à implémenter
-│   ├── in-progress/         ← En cours de développement
-│   └── done/                ← Terminées
 ├── BRIEF.template.md        ← Template de brief produit
-├── ARCHITECTURE.md          ← Documentation complète du système
-└── README.md                ← Mode d'emploi
+├── ROADMAP.md               ← Historique des versions et roadmap globale
+└── ARCHITECTURE.md          ← Documentation complète du système
 ```
 
 **Le workspace créé par init.sh :**
@@ -107,19 +109,14 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe
 ### GitHub Integration (local-first, GitHub-augmented)
 **Principe** : local = source de vérité, GitHub = miroir de visibilité. Tout fonctionne sans GitHub. Chaque option est indépendante et off par défaut.
 - **`GIT_STRATEGY`** : `local` (défaut, merge direct) | `pr` (GitHub PRs). Fallback local si PR échoue.
-- **Tracking issue** : `GITHUB_TRACKING_ISSUE=true` crée une issue "ORC Run", commentée à chaque feature. Fonctionne en mode `local` et `pr`.
-- **Signaux GitHub** : `GITHUB_SIGNALS=true` lit les labels `orc:pause`, `orc:stop`, `orc:continue`. Les signaux locaux (`.orc/`) fonctionnent toujours, GitHub est un canal additionnel.
-- **Approbation multi-source** : terminal (`c`), fichier local (`touch .orc/approve`), ou PR review GitHub. Premier arrivé gagne.
-- **Features abandonnées** : auto-création d'une issue "bug" avec les fix-reflections (si `gh` disponible).
-- **Roadmap sync** : `GITHUB_SYNC_ROADMAP=true` miroir push-only de ROADMAP.md → GitHub Issues. Crée/ferme les issues. L'orchestrateur ne lit jamais les issues comme source de features. Mapping dans `.orc/roadmap-issues.map`.
-- **Milestones** : `gh_sync_milestone()` crée un milestone par epic. Appelé au reset du compteur epic.
-- **Feedback GitHub** : `GITHUB_FEEDBACK=true` lit les commentaires humains sur la tracking issue et les injecte dans le prompt (en plus des notes locales).
-- **CI distant** : `GITHUB_CI=true` attend les checks GitHub Actions après la quality gate. Non-bloquant — les tests locaux font toujours foi. Poste aussi la quality gate comme commit status.
-- **Releases** : `GITHUB_RELEASES=true` crée une release après chaque meta-rétro (`v0.N.0`) et en fin de projet (`v1.0.0`). Changelog auto-généré.
+- **Tracking issue** : `GITHUB_TRACKING_ISSUE=true` crée une issue "ORC Run", commentée à chaque feature.
+- **Signaux GitHub** : `GITHUB_SIGNALS=true` lit les labels `orc:pause`, `orc:stop`, `orc:continue`. Les signaux locaux (`.orc/`) fonctionnent toujours.
+- **Roadmap sync** : `GITHUB_SYNC_ROADMAP=true` miroir push-only de ROADMAP.md → GitHub Issues. L'orchestrateur ne lit jamais les issues comme source de features.
+- **Feedback GitHub** : `GITHUB_FEEDBACK=true` lit les commentaires humains sur la tracking issue.
+- **CI distant** : `GITHUB_CI=true` attend les checks GitHub Actions après la quality gate. Non-bloquant — les tests locaux font toujours foi.
+- **Releases** : `GITHUB_RELEASES=true` crée une release après chaque meta-rétro (`v0.N.0`) et en fin de projet (`v1.0.0`).
 - **Dégradation gracieuse** : `gh` absent → tout fonctionne en local sans erreur.
-- Fonctions Phase 1 : `gh_available()`, `gh_pr_mode()`, `gh_create_tracking_issue()`, `gh_create_pr()`, `gh_merge_pr()`, `gh_comment()`, `gh_check_signals()`, `gh_create_abandoned_issue()`, `gh_close_tracking_issue()`.
-- Fonctions Phase 2 : `gh_sync_roadmap()`, `gh_sync_milestone()`, `gh_read_feedback()`.
-- Fonctions Phase 3 : `gh_wait_ci()`, `gh_post_quality_status()`, `gh_create_release()`.
+- Fonctions préfixées `gh_*` dans `orchestrator.sh` — Phase 1 (PR/tracking), Phase 2 (roadmap sync/feedback), Phase 3 (CI/releases).
 
 ### Détection de boucle fix
 `error_hash()` compare les erreurs entre tentatives. Même erreur 2x → prompt "change d'approche". 3x → abandon anticipé.
@@ -127,17 +124,11 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe
 ### Quality gate
 `QUALITY_COMMAND` exécuté après tests, avant merge. Non-bloquant si échec après correction.
 
-### Mémoire inter-projets
-`learnings/` dans le template accumule les insights. Copiés dans le projet au bootstrap, lus par la phase 00.
-
 ### Connaissance projet (codebase/ + stack-conventions.md)
-- `codebase/INDEX.md` : carte sémantique du projet (max 40 lignes). Lu AVANT chaque implémentation. Pointe vers les fichiers de détail.
-- `codebase/auto-map.md` : carte auto-générée par l'orchestrateur (grep des exports/classes). Vérité du code, pas maintenue par l'IA. Regénérée avant chaque feature.
-- `codebase/modules.md`, `utilities.md`, `integrations.md`, `data-models.md`, `architecture.md`, `security.md` : détail par domaine. L'IA ne lit que les fichiers pertinents pour la feature en cours.
-- `.claude/skills/stack-conventions.md` : conventions spécifiques à la stack (React, Astro, Java, etc.), patterns adoptés, anti-patterns, utilities réutilisables, patterns de sécurité. Auto-enrichi au fil du projet.
-
-### Réflexions structurées (pattern Reflexion)
-Après chaque échec de fix, l'IA écrit une réflexion structurée dans `logs/fix-reflections-N.md` (ce que j'ai tenté, pourquoi ça a échoué, ce que je dois essayer). Ces réflexions sont injectées dans les tentatives suivantes.
+- `codebase/INDEX.md` : carte sémantique du projet (max 40 lignes). Lu AVANT chaque implémentation.
+- `codebase/auto-map.md` : carte auto-générée (grep des exports/classes). Regénérée avant chaque feature.
+- Fichiers de détail par domaine : `modules.md`, `utilities.md`, `integrations.md`, `data-models.md`, `architecture.md`, `security.md`.
+- `.claude/skills/stack-conventions.md` : conventions spécifiques à la stack, auto-enrichi au fil du projet.
 
 ### Contexte adaptatif par phase
 `run_claude()` injecte un contexte différent selon la phase :
@@ -146,6 +137,9 @@ Après chaque échec de fix, l'IA écrit une réflexion structurée dans `logs/f
 - strategy → INDEX.md + architecture.md + research/INDEX.md
 - reflect → auto-map.md (vérité) + INDEX.md + fichiers de détail à mettre à jour
 - meta-retro → INDEX.md + auto-map.md + audit de cohérence de tous les fichiers
+
+### Réflexions structurées (pattern Reflexion)
+Après chaque échec de fix, l'IA écrit une réflexion structurée dans `logs/fix-reflections-N.md`. Ces réflexions sont injectées dans les tentatives suivantes.
 
 ## Roadmap
 
@@ -158,8 +152,7 @@ Chaque item a un frontmatter YAML avec : `id`, `priority` (P0-P3), `type`, `effo
 - **Filtrer** : `--priority P1`, `--tag adoption`, `--epic adopt-mode`
 - **Créer un item** : copier `roadmap/TEMPLATE.md`, incrémenter l'ID
 - **Changer de statut** : `mv roadmap/planned/ROADMAP-NNN.md roadmap/in-progress/`
-- **Skill** : `skills-templates/roadmap-item.md` guide la création pendant les rétrospectives
 
 ## Version actuelle
 
-v0.5.0 — Production-ready
+v0.6.0

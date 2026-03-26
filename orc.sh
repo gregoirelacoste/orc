@@ -53,11 +53,11 @@ orc_help() {
   printf "    ${CYAN}orc agent logs <nom>${NC}              Logs temps réel\n"
   echo ""
   printf "  ${BOLD}Roadmap :${NC}\n"
-  printf "    ${CYAN}orc roadmap${NC}                       Vue compacte\n"
+  printf "    ${CYAN}orc roadmap${NC}                       Roadmap orc (développement du template)\n"
+  printf "    ${CYAN}orc roadmap <projet>${NC}              Roadmap d'un projet\n"
   printf "    ${CYAN}orc roadmap --detail${NC}              + contexte, dépendances\n"
   printf "    ${CYAN}orc roadmap --full${NC}                + specs, critères\n"
   printf "    ${CYAN}orc roadmap --priority P1${NC}         Filtrer par priorité\n"
-  printf "    ${CYAN}orc roadmap --tag adoption${NC}        Filtrer par tag\n"
   echo ""
   printf "  ${BOLD}Administration :${NC}\n"
   printf "    ${CYAN}orc admin config${NC}                  Voir la config globale\n"
@@ -70,7 +70,7 @@ orc_help() {
   printf "    ${CYAN}orc admin version${NC}                 Version + vérifications\n"
   printf "    ${CYAN}orc admin update${NC}                  Mettre à jour le template\n"
   echo ""
-  printf "  ${DIM}Raccourcis : 'orc s' = 'orc agent status', 'orc r' = 'orc roadmap'${NC}\n"
+  printf "  ${DIM}Raccourcis : 'orc s' = status, 'orc l <nom>' = logs, 'orc r' = roadmap${NC}\n"
   echo ""
 }
 
@@ -88,7 +88,12 @@ case "$COMMAND" in
     ;;
   roadmap|r)
     source "$ORC_DIR/orc-agent.sh"
-    cmd_roadmap "$@"
+    # Si le premier arg est un nom de projet existant, afficher sa roadmap
+    if [ -n "${1:-}" ] && [ -d "$(project_dir "$1")" ]; then
+      cmd_project_roadmap "$@"
+    else
+      cmd_roadmap "$@"
+    fi
     ;;
   admin)
     source "$ORC_DIR/orc-admin.sh"

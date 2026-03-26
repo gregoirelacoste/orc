@@ -1587,7 +1587,7 @@ if [ ! -f "$PROJECT_DIR/CLAUDE.md" ]; then
   if compgen -G "$SCRIPT_DIR/learnings/*.md" > /dev/null 2>&1; then
     mkdir -p "$PROJECT_DIR/learnings"
     for learning in "$SCRIPT_DIR/learnings/"*.md; do
-      local dest="$PROJECT_DIR/learnings/$(basename "$learning")"
+      dest="$PROJECT_DIR/learnings/$(basename "$learning")"
       [ ! -f "$dest" ] && cp "$learning" "$dest"
     done
     log INFO "Learnings inter-projets copiés ($(ls -1 "$SCRIPT_DIR/learnings/"*.md 2>/dev/null | wc -l) fichiers)."
@@ -1698,7 +1698,6 @@ EOF
     "FEATURE_BRANCH=$feature_branch")
 
   # Injecter les notes humaines mid-run si présentes
-  local human_notes
   human_notes=$(read_human_notes)
   if [ -n "$human_notes" ]; then
     impl_prompt="$impl_prompt
@@ -1707,7 +1706,6 @@ $human_notes"
   fi
 
   # Injecter le feedback GitHub (commentaires sur tracking issue) si activé
-  local gh_feedback
   gh_feedback=$(gh_read_feedback)
   if [ -n "$gh_feedback" ]; then
     impl_prompt="$impl_prompt
@@ -1716,7 +1714,7 @@ $gh_feedback"
   fi
 
   # Injecter le feedback humain de la feature précédente si présent
-  local prev_feedback="$PROJECT_DIR/logs/human-feedback-$((FEATURE_COUNT - 1)).md"
+  prev_feedback="$PROJECT_DIR/logs/human-feedback-$((FEATURE_COUNT - 1)).md"
   if [ -f "$prev_feedback" ]; then
     impl_prompt="$impl_prompt
 
@@ -1731,7 +1729,7 @@ $(cat "$prev_feedback")"
   attempt=0
   tests_passed=false
   LAST_ERROR_HASH=""
-  local same_error_count=0
+  same_error_count=0
 
   while [ $attempt -lt $MAX_FIX_ATTEMPTS ]; do
     log INFO "Tests — tentative $((attempt + 1))/$MAX_FIX_ATTEMPTS"
@@ -1748,7 +1746,6 @@ $(cat "$prev_feedback")"
     attempt=$((attempt + 1))
 
     # Détection de boucle : même erreur que la tentative précédente ?
-    local current_error_hash
     current_error_hash=$(error_hash "${BUILD_OUTPUT}${TEST_OUTPUT}")
     if [ "$current_error_hash" = "$LAST_ERROR_HASH" ]; then
       same_error_count=$((same_error_count + 1))
@@ -1766,7 +1763,7 @@ $(cat "$prev_feedback")"
       fi
 
       # Réflexion structurée (pattern Reflexion) : l'IA écrit ce qu'elle a tenté et pourquoi ça a échoué
-      local reflection_file="$PROJECT_DIR/logs/fix-reflections-$FEATURE_COUNT.md"
+      reflection_file="$PROJECT_DIR/logs/fix-reflections-$FEATURE_COUNT.md"
       run_claude "Tu viens d'essayer de corriger la feature '$feature_name' (tentative $attempt/$MAX_FIX_ATTEMPTS) et ça a échoué.
 
 BUILD (exit $BUILD_EXIT):
@@ -1838,7 +1835,6 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
 
   # --- Quality Gate (post-tests, pré-merge) ---
   if [ "$tests_passed" = true ] && [ -n "${QUALITY_COMMAND:-}" ]; then
-    local quality_output quality_exit
     log INFO "Quality gate en cours..."
     quality_output=$(run_in_project "$QUALITY_COMMAND 2>&1") && quality_exit=0 || quality_exit=$?
 
@@ -1873,7 +1869,6 @@ Exemples de problèmes : performance dégradée, bundle trop gros, couverture in
 
   # --- CI distant (bonus, non-bloquant) ---
   if [ "$tests_passed" = true ]; then
-    local ci_branch
     ci_branch=$(run_in_project "git branch --show-current 2>/dev/null || echo ''")
     gh_wait_ci "$ci_branch" || log WARN "CI distant échoué (non-bloquant)."
   fi
@@ -1882,11 +1877,10 @@ Exemples de problèmes : performance dégradée, bundle trop gros, couverture in
   if [ "$tests_passed" = true ]; then
     current_branch=$(run_in_project "git branch --show-current 2>/dev/null || echo ''")
     if [ -n "$current_branch" ] && [ "$current_branch" != "main" ]; then
-      local safe_feature_name="${feature_name//\'/}"
+      safe_feature_name="${feature_name//\'/}"
 
       if gh_pr_mode; then
         # === MODE PR : créer une PR, merger via GitHub ===
-        local pr_url
         pr_url=$(gh_create_pr "$current_branch" "$safe_feature_name" "$attempt") || pr_url=""
 
         if [ -n "$pr_url" ]; then
@@ -1953,7 +1947,7 @@ done
 
 if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
   EVOLVE_CYCLES=$((EVOLVE_CYCLES + 1))
-  local max_evolve="${MAX_EVOLVE_CYCLES:-0}"
+  max_evolve="${MAX_EVOLVE_CYCLES:-0}"
 
   if [ "$max_evolve" -gt 0 ] && [ "$EVOLVE_CYCLES" -gt "$max_evolve" ]; then
     log WARN "Limite de cycles evolve atteinte ($EVOLVE_CYCLES/$max_evolve) — arrêt."
@@ -1965,13 +1959,12 @@ if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
 
     if [ ! -f "$PROJECT_DIR/DONE.md" ] && grep -q '^\- \[ \]' "$PROJECT_DIR/ROADMAP.md" 2>/dev/null; then
       # Compter les features ajoutées par l'IA
-      local new_features
       new_features=$(grep -c '^\- \[ \]' "$PROJECT_DIR/ROADMAP.md" 2>/dev/null || echo "0")
       AI_ROADMAP_ADDS=$((AI_ROADMAP_ADDS + new_features))
       log INFO "Nouvelles features ajoutées par l'IA : $new_features (total IA: $AI_ROADMAP_ADDS)"
 
       # Forcer une pause si trop de features ajoutées par l'IA
-      local max_ai_adds="${MAX_AI_ROADMAP_ADDS:-5}"
+      max_ai_adds="${MAX_AI_ROADMAP_ADDS:-5}"
       if [ "$max_ai_adds" -gt 0 ] && [ "$AI_ROADMAP_ADDS" -ge "$max_ai_adds" ]; then
         log WARN "L'IA a ajouté $AI_ROADMAP_ADDS features à la roadmap — pause de validation requise."
         notify "L'IA a ajouté $AI_ROADMAP_ADDS features à la roadmap. Validation humaine recommandée."
@@ -2053,7 +2046,7 @@ log INFO "Suggestions d'amélioration : project/orchestrator-improvements.md"
 
 # Extraire les learnings et les copier dans le template pour les futurs projets
 if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
-  local learning_file="$SCRIPT_DIR/learnings/$(date +%Y-%m-%d)-${PROJECT_NAME:-project}.md"
+  learning_file="$SCRIPT_DIR/learnings/$(date +%Y-%m-%d)-${PROJECT_NAME:-project}.md"
   {
     echo "# Learnings — ${PROJECT_NAME:-project}"
     echo "Date : $(date '+%Y-%m-%d')"
@@ -2064,7 +2057,7 @@ if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
   log INFO "Learnings sauvés dans le template : $learning_file"
 
   # Extraire les conventions bash découvertes et les ajouter à ORC stack-conventions
-  local orc_conventions="$SCRIPT_DIR/.claude/skills/stack-conventions.md"
+  orc_conventions="$SCRIPT_DIR/.claude/skills/stack-conventions.md"
   if [ -f "$orc_conventions" ]; then
     # Demander à Claude d'enrichir les stack-conventions de ORC
     run_claude "Lis le fichier orchestrator-improvements.md que tu viens de produire.
@@ -2083,7 +2076,7 @@ S'il n'y a rien de nouveau à ajouter, ne modifie rien." \
   fi
 
   # Mettre à jour codebase/INDEX.md de ORC si des changements structurels ont été faits
-  local orc_index="$SCRIPT_DIR/codebase/INDEX.md"
+  orc_index="$SCRIPT_DIR/codebase/INDEX.md"
   if [ -f "$orc_index" ]; then
     run_claude "Lis le fichier orchestrator-improvements.md et vérifie si les améliorations
 proposées impactent la structure de l'orchestrateur (nouvelles fonctions, nouveaux fichiers,

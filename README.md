@@ -1,75 +1,171 @@
-# Agent Autonome Claude
+# orc — Agent Autonome Claude
 
-Un agent Claude Code 100% autonome qui construit un produit de A à Z : veille marché, roadmap, développement, tests, corrections, et auto-amélioration — avec intervention humaine configurable.
+Un orchestrateur qui pilote Claude Code en boucle autonome pour construire un produit de A à Z : veille marché, roadmap, développement, tests, corrections et auto-amélioration.
 
 ## Prérequis
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installé et authentifié
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installé
+- Clé API Anthropic (`ANTHROPIC_API_KEY`)
 - Git
-- [GitHub CLI](https://cli.github.com/) (`gh`) — optionnel, pour créer le repo distant
+- Node.js 22+
+- [GitHub CLI](https://cli.github.com/) (`gh`) — optionnel, pour l'intégration GitHub
+- `jq` — optionnel, pour le tracking des coûts
+
+## Installation
+
+### Sur ta machine
+
+```bash
+git clone git@github.com:gregoirelacoste/orc.git
+cd orc
+```
+
+Rendre `orc` disponible partout :
+
+```bash
+# Option 1 : symlink (recommandé)
+sudo ln -sf "$(pwd)/orc.sh" /usr/local/bin/orc
+
+# Option 2 : alias dans ~/.bashrc ou ~/.zshrc
+echo "alias orc='$(pwd)/orc.sh'" >> ~/.zshrc
+source ~/.zshrc
+```
+
+Configurer ta clé API :
+
+```bash
+# Créer un .env dans le dossier orc/
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' > .env
+```
+
+### Sur un VPS (Ubuntu 22+ / Debian 12+)
+
+Le script installe tout (Node.js, Claude CLI, orc) et rend `orc` disponible globalement :
+
+```bash
+ssh root@<vps-ip> 'bash -s' < deploy.sh
+```
 
 ## Démarrage rapide
 
+### 1. Créer un projet
+
 ```bash
-# 1. Cloner le template
-git clone git@github.com:gregoirelacoste/orc.git
-cd orc
+./orc.sh agent new mon-projet
+```
 
-# 2. Initialiser un projet (crée un workspace séparé)
-./init.sh pc-builder
+Claude te pose ~22 questions pour rédiger le brief produit (`BRIEF.md`).
+Le workspace est créé dans `~/projects/mon-projet/`.
 
-# 3. Aller dans le workspace et lancer
-cd ../pc-builder
-./orchestrator.sh
+Si tu as déjà un brief :
+
+```bash
+./orc.sh agent new mon-projet --brief briefs/mon-brief.md
+```
+
+### 2. Configurer (optionnel)
+
+Avant de lancer, tu peux ajuster la config du projet :
+
+```bash
+vim ~/projects/mon-projet/.orc/config.sh
+```
+
+Les paramètres clés :
+
+| Paramètre | Défaut | Description |
+|---|---|---|
+| `MAX_FEATURES` | 50 | Nombre total de features avant arrêt |
+| `MAX_FIX_ATTEMPTS` | 5 | Tentatives de fix par feature |
+| `REQUIRE_HUMAN_APPROVAL` | false | Valider chaque merge manuellement |
+| `PAUSE_EVERY_N_FEATURES` | 0 | Pause toutes les N features (0 = jamais) |
+| `BUILD_COMMAND` | `npm run build` | Commande de build |
+| `TEST_COMMAND` | `npx playwright test` | Commande de test |
+| `CLAUDE_MODEL` | *(défaut CLI)* | Modèle Claude à utiliser |
+
+Voir `config.default.sh` pour la liste complète.
+
+### 3. Lancer
+
+```bash
+./orc.sh agent start mon-projet
+```
+
+L'orchestrateur tourne en background. Le code est généré dans `~/projects/mon-projet/project/`.
+
+### 4. Suivre l'avancement
+
+```bash
+./orc.sh s                     # Vue d'ensemble de tous les projets
+./orc.sh s mon-projet          # Détail d'un projet (features, coût, roadmap)
+./orc.sh l mon-projet          # Logs en temps réel (tail -f)
+./orc.sh r                     # Roadmap orc
+```
+
+### 5. Intervenir en cours de route
+
+```bash
+# Injecter des notes que Claude lira avant la prochaine feature
+vim ~/projects/mon-projet/.orc/human-notes.md
+
+# Demander une pause après la feature en cours
+touch ~/projects/mon-projet/.orc/pause-requested
+
+# Arrêter proprement après la feature en cours
+touch ~/projects/mon-projet/.orc/stop-after-feature
+
+# Arrêt immédiat
+./orc.sh agent stop mon-projet
+```
+
+## Modes d'autonomie
+
+Configurables dans `.orc/config.sh` :
+
+| Mode | Config | Comportement |
+|---|---|---|
+| **Pilote auto** | `PAUSE=0, APPROVAL=false` | 100% autonome — prototypes, exploration |
+| **Copilote** | `PAUSE=0, APPROVAL=true` | Claude code, tu valides chaque merge |
+| **Supervisé** | `PAUSE=3, APPROVAL=false` | Pause toutes les 3 features pour review |
+
+## Commandes
+
+### Projets
+
+```bash
+orc agent new <nom> [--brief x.md]    # Créer un projet
+orc agent start <nom>                  # Lancer en background
+orc agent stop <nom>                   # Arrêter proprement
+orc agent restart <nom>                # Redémarrer
+orc agent status                       # Vue d'ensemble
+orc agent status <nom>                 # Détail d'un projet
+orc agent logs <nom>                   # Logs temps réel
+orc agent logs <nom> --full            # Log complet (less)
+orc agent update                       # Mettre à jour orc (git pull)
+```
+
+### Administration
+
+```bash
+orc admin config                       # Config globale
+orc admin model                        # Modèle Claude actuel + tarifs
+orc admin model set <model-id>         # Changer le modèle
+orc admin budget                       # Coûts détaillés par projet
+orc admin key                          # Voir les clés API
+orc admin key set <key>                # Configurer clé Anthropic
+orc admin version                      # Version + vérification dépendances
+```
+
+### Raccourcis
+
+```bash
+orc s              # → orc agent status
+orc s <nom>        # → orc agent status <nom>
+orc l <nom>        # → orc agent logs <nom>
+orc r              # → orc roadmap
 ```
 
 ## Comment ça marche
-
-### `init.sh` crée un workspace séparé
-
-```
-orc/                         ← ce repo (template, jamais modifié)
-│
-└── ./init.sh mon-projet
-         │
-         ▼
-../mon-projet/               ← workspace auto-contenu
-├── BRIEF.md                 ← brief produit (rédigé avec Claude)
-├── orchestrator.sh          ← copié depuis le template
-├── phases/                  ← copié depuis le template
-├── skills-templates/        ← copié depuis le template
-├── .orc/                    ← état orchestrateur (config, logs, state)
-│
-└── project/                 ← le code produit (son propre repo git)
-    ├── .git/
-    ├── CLAUDE.md            ← auto-généré et auto-amélioré
-    ├── ROADMAP.md           ← auto-généré, évolue avec le projet
-    ├── .claude/skills/      ← auto-générées par Claude
-    ├── research/            ← veille marché
-    ├── src/                 ← code applicatif
-    └── e2e/                 ← tests Playwright
-```
-
-Le template reste propre. Chaque projet a son workspace isolé.
-Le code produit dans `project/` a son propre git et peut être pushé vers GitHub.
-
-### `init.sh` — le wizard en 5 étapes
-
-| Étape | Ce qui se passe |
-|---|---|
-| **1. Nom** | Nomme ton projet |
-| **2. Description** | Décris l'idée en 1-2 phrases |
-| **3. Configuration** | Mode d'autonomie + options |
-| **4. Structure** | Crée le workspace avec tout le nécessaire |
-| **5. Brief** | Claude product director pose ~22 questions et rédige le BRIEF.md |
-
-```bash
-./init.sh                          # interactif complet
-./init.sh mon-projet               # avec nom
-./init.sh mon-projet --skip-brief  # sans rédaction assistée du brief
-```
-
-### `orchestrator.sh` — la boucle autonome
 
 ```
 BRIEF.md (immuable)
@@ -91,72 +187,77 @@ BOOTSTRAP ──▶ RECHERCHE INITIALE ──▶ STRATÉGIE & ROADMAP
                                            │
                                            ▼
                                     MÉTA-RÉTROSPECTIVE
-                                    Veille tendances
                                     Repriorisation
                                            │
                                            ▼
                                     Nouvelle itération...
 ```
 
-## Modes d'autonomie
+L'agent améliore ses propres outils au fil du projet :
+- **CLAUDE.md** du projet — ajoute des règles quand il découvre des pièges
+- **Skills** — crée de nouveaux workflows quand un pattern se répète
+- **ROADMAP.md** — ajoute/repriorise des features après chaque veille
 
-| Mode | Comportement | Quand l'utiliser |
-|---|---|---|
-| **Pilote auto** | 100% autonome | Prototypes, exploration |
-| **Copilote** | Claude code, tu valides chaque merge | Projets avec standards qualité |
-| **Supervisé** | Pause toutes les N features | Quand tu veux garder le contrôle |
+## Structure d'un workspace
 
-## Auto-amélioration
-
-L'agent améliore ses propres instructions au fil du projet :
-
-- **CLAUDE.md** — Ajoute des règles quand il découvre des pièges
-- **Skills** — Crée de nouveaux workflows quand un pattern se répète
-- **ROADMAP.md** — Ajoute/repriorise des features après la veille
-- **Recherche** — Veille concurrentielle intégrée au cycle de dev
-
-## Configuration
-
-Tout dans `config.sh` du workspace :
-
-```bash
-MAX_FIX_ATTEMPTS=5              # Tentatives de fix par feature
-MAX_FEATURES=50                 # Arrêt après N features
-EPIC_SIZE=3                     # Features par epic
-META_RETRO_FREQUENCY=5          # Méta-rétro toutes les N features
-PAUSE_EVERY_N_FEATURES=0        # 0 = jamais
-REQUIRE_HUMAN_APPROVAL=false    # Valider chaque merge
-ENABLE_RESEARCH=true            # Veille marché
-BUILD_COMMAND="npm run build"   # Commande build
-TEST_COMMAND="npx playwright test"
+```
+~/projects/mon-projet/
+├── BRIEF.md                 ← Brief produit (source de vérité, immuable)
+├── orchestrator.sh          ← Boucle principale
+├── phases/                  ← Prompts par phase (modifiables)
+├── skills-templates/        ← Skills copiées dans le projet
+├── .orc/                    ← État orchestrateur
+│   ├── config.sh            ← Configuration du projet
+│   ├── state.json           ← Compteurs, reprise après crash
+│   ├── tokens.json          ← Tracking des coûts
+│   ├── human-notes.md       ← Notes injectées dans le prompt
+│   ├── .pid                 ← PID du process en cours
+│   └── logs/                ← Logs orchestrateur
+│
+└── project/                 ← Le code produit (son propre repo git)
+    ├── CLAUDE.md            ← Auto-généré et auto-amélioré
+    ├── ROADMAP.md           ← Auto-généré, évolue avec le projet
+    ├── codebase/            ← Carte sémantique du code
+    ├── research/            ← Veille marché
+    ├── .claude/skills/      ← Skills de l'agent
+    └── src/                 ← Code applicatif
 ```
 
-## Surveiller l'avancement
+## GitHub (optionnel)
 
-```bash
-tail -f logs/orchestrator.log                     # logs temps réel
-grep -c '\[x\]' project/ROADMAP.md                # features terminées
-cat project/ROADMAP.md                            # roadmap
-cat project/logs/retrospective-*.md               # rétrospectives
-```
+Tout fonctionne en local sans GitHub. Chaque option est indépendante et off par défaut dans `.orc/config.sh` :
+
+| Option | Description |
+|---|---|
+| `GIT_STRATEGY="pr"` | Créer des Pull Requests au lieu de merge direct |
+| `GITHUB_TRACKING_ISSUE=true` | Issue de suivi commentée à chaque feature |
+| `GITHUB_SIGNALS=true` | Contrôle via labels (`orc:pause`, `orc:stop`) |
+| `GITHUB_SYNC_ROADMAP=true` | Miroir ROADMAP → GitHub Issues |
+| `GITHUB_FEEDBACK=true` | Lire les commentaires GitHub comme feedback |
+| `GITHUB_CI=true` | Valider les checks GitHub Actions |
+| `GITHUB_RELEASES=true` | Créer des releases automatiques |
 
 ## FAQ
 
 **Le workspace est-il un repo git ?**
-Non. Seul `project/` à l'intérieur a son propre git. Le workspace est de l'outillage local.
+Non. Seul `project/` à l'intérieur a son propre git.
 
-**Je peux lancer plusieurs projets ?**
-Oui. Chaque `./init.sh nom-projet` crée un workspace indépendant.
+**Je peux lancer plusieurs projets en parallèle ?**
+Oui. Chaque projet est indépendant. `orc s` les affiche tous.
 
-**Je peux reprendre après un crash ?**
-Oui. L'orchestrateur détecte un projet existant et reprend (features non cochées dans ROADMAP).
+**Reprendre après un crash ?**
+L'orchestrateur détecte l'état existant et reprend automatiquement (`orc agent start <nom>`).
 
 **Combien ça coûte ?**
-~50-100K tokens par feature. Un projet de 10 features ~= 500K-1M tokens.
+~50-100K tokens par feature. Un projet de 10 features ≈ 500K-1M tokens. Suivre avec `orc admin budget`.
 
-**Je peux modifier les prompts ?**
-Oui. Édite les fichiers dans `phases/` du workspace. Chaque phase est un prompt Markdown avec des placeholders `{{VAR}}`.
+**Modifier les prompts ?**
+Oui. Éditer les fichiers dans `~/projects/mon-projet/phases/`. Chaque phase est un prompt Markdown avec des placeholders `{{VAR}}`.
+
+**Changer de modèle Claude ?**
+`orc admin model set claude-sonnet-4-6-20250514` — appliqué aux prochains lancements.
 
 ## Documentation
 
-Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour le détail complet de chaque phase.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Documentation technique complète
+- [ROADMAP.md](ROADMAP.md) — Historique des versions et roadmap d'orc

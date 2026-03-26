@@ -55,8 +55,6 @@ cmd_new() {
 
   local dir
   dir=$(project_dir "$name")
-  [ -d "$dir" ] && die "Le projet '$name' existe déjà ($dir)"
-
   shift
   local brief_file=""
   while [ $# -gt 0 ]; do
@@ -70,8 +68,20 @@ cmd_new() {
     esac
   done
 
+  # Reprise : si le dossier existe mais pas de BRIEF.md, on reprend
+  local resume=false
+  if [ -d "$dir" ]; then
+    if [ -f "$dir/BRIEF.md" ]; then
+      die "Le projet '$name' existe déjà avec un brief ($dir)"
+    else
+      printf "${YELLOW}Workspace incomplet détecté — reprise...${NC}\n\n"
+      resume=true
+    fi
+  fi
+
   printf "${BOLD}Création du projet '%s'...${NC}\n\n" "$name"
 
+  # Création/réparation du workspace (idempotent)
   mkdir -p "$dir"
   cp "$ORC_DIR/orchestrator.sh" "$dir/"
   cp -r "$ORC_DIR/phases" "$dir/"
@@ -79,10 +89,10 @@ cmd_new() {
   cp "$ORC_DIR/BRIEF.template.md" "$dir/"
   chmod +x "$dir/orchestrator.sh"
   mkdir -p "$dir/.orc/logs"
-  cp "$ORC_DIR/config.default.sh" "$dir/.orc/config.sh"
+  [ -f "$dir/.orc/config.sh" ] || cp "$ORC_DIR/config.default.sh" "$dir/.orc/config.sh"
 
   mkdir -p "$dir/project"
-  ( cd "$dir/project" && git init -b main > /dev/null 2>&1 )
+  [ -d "$dir/project/.git" ] || ( cd "$dir/project" && git init -b main > /dev/null 2>&1 )
 
   mkdir -p "$dir/project/research/competitors" \
            "$dir/project/research/trends" \
@@ -93,7 +103,11 @@ cmd_new() {
   mkdir -p "$dir/project/.claude/skills"
   cp "$dir/skills-templates/"*.md "$dir/project/.claude/skills/"
 
-  printf "  ${GREEN}✓${NC} Workspace créé : %s\n" "$dir"
+  if [ "$resume" = true ]; then
+    printf "  ${GREEN}✓${NC} Workspace réparé : %s\n" "$dir"
+  else
+    printf "  ${GREEN}✓${NC} Workspace créé : %s\n" "$dir"
+  fi
 
   if [ -n "$brief_file" ]; then
     local resolved_brief=""
@@ -114,12 +128,12 @@ cmd_new() {
     local brief_skill
     brief_skill=$(cat "$dir/skills-templates/write-brief.md")
 
-    ( cd "$dir" && claude "$brief_skill
+    ( cd "$dir" && claude --max-turns 40 -- "$brief_skill
 
 ---
 
 L'utilisateur crée un projet appelé \"$name\".
-Pose les questions une par une. Écris le résultat dans BRIEF.md." --max-turns 40 )
+Pose les questions une par une. Écris le résultat dans BRIEF.md." )
 
     if [ -f "$dir/BRIEF.md" ]; then
       cp "$dir/BRIEF.md" "$dir/project/BRIEF.md"
@@ -160,7 +174,10 @@ cmd_start() {
   export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
   export GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 
-  [ -z "$ANTHROPIC_API_KEY" ] && die "ANTHROPIC_API_KEY non configurée. Voir : orc admin key"
+  # L'API key n'est pas requise si Claude Code CLI est authentifié (OAuth/login)
+  if [ -z "$ANTHROPIC_API_KEY" ] && ! command -v claude &> /dev/null; then
+    die "Claude Code CLI non trouvé et ANTHROPIC_API_KEY non configurée. Installer claude ou configurer la clé : orc admin key"
+  fi
 
   # Injecter le modèle si configuré globalement
   local model_file="$ORC_DIR/.model"
@@ -169,10 +186,10 @@ cmd_start() {
     CLAUDE_MODEL=$(cat "$model_file")
   fi
 
-  ( cd "$dir" && nohup ./orchestrator.sh >> .orc/logs/orchestrator.log 2>&1 & echo $! > .orc/.pid )
-
-  local pid
-  pid=$(cat "$dir/.orc/.pid")
+  mkdir -p "$dir/.orc/logs"
+  nohup bash -c "cd \"$dir\" && exec ./orchestrator.sh" >> "$dir/.orc/logs/orchestrator.log" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$dir/.orc/.pid"
 
   printf "${GREEN}Projet '%s' lancé${NC} (PID %s)\n" "$name" "$pid"
   printf "  Logs   : ${CYAN}orc logs %s${NC}\n" "$name"
@@ -388,6 +405,14 @@ cmd_logs() {
   if [ "${1:-}" = "--full" ]; then
     less +G "$logfile"
   else
+    # Afficher le contexte récent puis suivre en temps réel
+    local total
+    total=$(wc -l < "$logfile")
+    if [ "$total" -gt 30 ]; then
+      printf "${DIM}── %s dernières lignes ──${NC}\n" "30"
+      tail -30 "$logfile"
+      printf "${DIM}── suivi en temps réel (Ctrl+C pour quitter) ──${NC}\n\n"
+    fi
     tail -f "$logfile"
   fi
 }
@@ -696,15 +721,65 @@ cmd_roadmap() {
   fi
 }
 
+# ============================================================
+# COMMANDE : roadmap projet
+# ============================================================
+
+cmd_project_roadmap() {
+  local name="${1:-}"
+  [ -z "$name" ] && die "Usage : orc roadmap <projet>"
+  require_project "$name"
+
+  local dir
+  dir=$(project_dir "$name")
+  local roadmap_file="$dir/project/ROADMAP.md"
+
+  if [ ! -f "$roadmap_file" ]; then
+    die "Pas de ROADMAP.md pour '$name' (le projet n'a peut-être pas encore démarré)"
+  fi
+
+  local done_count todo_count
+  done_count=$(grep -c '^\- \[x\]' "$roadmap_file" 2>/dev/null || echo "0")
+  todo_count=$(grep -c '^\- \[ \]' "$roadmap_file" 2>/dev/null || echo "0")
+
+  echo ""
+  printf "${BOLD}ROADMAP — %s${NC}" "$name"
+  printf "         ${GREEN}%s faites${NC} | ${CYAN}%s restantes${NC}\n" "$done_count" "$todo_count"
+  printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  echo ""
+
+  # Afficher les features avec coloration
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^-\ \[x\] ]]; then
+      printf "  ${GREEN}%s${NC}\n" "$line"
+    elif [[ "$line" =~ ^-\ \[\ \] ]]; then
+      printf "  ${CYAN}%s${NC}\n" "$line"
+    elif [[ "$line" =~ ^## ]]; then
+      printf "\n ${BOLD}%s${NC}\n" "$line"
+    elif [[ "$line" =~ ^# ]]; then
+      : # skip title, we have our own header
+    elif [ -n "$line" ]; then
+      printf "  %s\n" "$line"
+    fi
+  done < "$roadmap_file"
+
+  echo ""
+  printf "${DIM}Fichier : %s${NC}\n\n" "$roadmap_file"
+}
+
 cmd_roadmap_help() {
   echo ""
-  printf "${BOLD}orc roadmap — Suivi de la roadmap${NC}\n"
+  printf "${BOLD}orc roadmap — Suivi des roadmaps${NC}\n"
   echo ""
-  printf "  ${CYAN}orc roadmap${NC}                      Vue compacte\n"
-  printf "  ${CYAN}orc roadmap --detail${NC}              Vue détaillée (contexte, dépendances)\n"
-  printf "  ${CYAN}orc roadmap --full${NC}                Vue exhaustive (specs, critères)\n"
+  printf "  ${BOLD}Projet :${NC}\n"
+  printf "  ${CYAN}orc roadmap <projet>${NC}              Roadmap d'un projet (ROADMAP.md)\n"
   echo ""
-  printf "  ${BOLD}Filtres :${NC}\n"
+  printf "  ${BOLD}Template orc :${NC}\n"
+  printf "  ${CYAN}orc roadmap${NC}                       Vue compacte (roadmap orc)\n"
+  printf "  ${CYAN}orc roadmap --detail${NC}              + contexte, dépendances\n"
+  printf "  ${CYAN}orc roadmap --full${NC}                + specs, critères\n"
+  echo ""
+  printf "  ${BOLD}Filtres (roadmap orc) :${NC}\n"
   printf "  ${CYAN}--priority P0|P1|P2|P3${NC}           Par priorité\n"
   printf "  ${CYAN}--tag <tag>${NC}                      Par tag\n"
   printf "  ${CYAN}--epic <epic>${NC}                    Par epic\n"
