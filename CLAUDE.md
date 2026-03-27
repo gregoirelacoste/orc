@@ -72,10 +72,11 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 ### CLI unifiée (`orc`)
 - `orc agent new <nom> [--brief x.md] [--no-clarify]` — créer un projet (wizard, brief+clarification, ou brief direct)
 - `orc agent start|stop|status|logs <nom>` — gestion des projets
+- `orc agent dashboard <nom>` — dashboard live avec progression, roadmap, activité (auto-refresh 5s)
 - `orc roadmap [--detail|--full] [--priority P1] [--tag x]` — suivi roadmap
 - `orc admin config|model|budget|key|version` — administration
 - `orc docs [sujet]` — documentation utilisateur
-- `orc s` / `orc r` / `orc l <nom>` — raccourcis (status, roadmap, logs)
+- `orc s` / `orc r` / `orc l <nom>` / `orc dash <nom>` — raccourcis (status, roadmap, logs, dashboard)
 
 ### Développement
 - `bash -n orchestrator.sh` — vérifier la syntaxe sans exécuter
@@ -138,6 +139,18 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 
 ### Quality gate
 `QUALITY_COMMAND` exécuté après tests, avant merge. Non-bloquant si échec après correction.
+
+### Vérification fonctionnelle
+`FUNCTIONAL_CHECK_COMMAND` exécuté après chaque merge de feature ET en fin de run. Garantit que l'app reste fonctionnelle à tout moment. Si échec : cycle de fix dédié, puis re-vérification. Résultat persisté dans `state.json` (`functional_check_passed`).
+
+### Tracking enrichi (state.json)
+`state.json` contient désormais : `current_feature`, `current_phase`, `phase_started_at`, `run_started_at`, `features_timeline[]` (historique avec status/timing/fix_attempts par feature), `functional_check_passed`. Alimenté par `update_phase_tracking()`, `timeline_add()`, `timeline_update_last()`.
+
+### Cochage fiable de ROADMAP.md
+`mark_feature_done_bash()` coche la feature dans ROADMAP.md via `sed` après chaque merge réussi. Double sécurité avec le cochage par Claude en phase reflect.
+
+### Dashboard live
+`orc dashboard <projet>` (raccourci `orc dash`) affiche un dashboard live auto-refresh (5s) avec : barre de progression, feature en cours, coût, ETA, roadmap colorée, dernière activité. Basé sur la lecture de `state.json`, `tokens.json`, ROADMAP.md et `orchestrator.log`.
 
 ### Connaissance projet (.orc/codebase/ + stack-conventions.md)
 - `.orc/codebase/INDEX.md` : carte sémantique du projet (max 40 lignes). Lu AVANT chaque implémentation.

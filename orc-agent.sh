@@ -277,6 +277,97 @@ cmd_restart() {
 }
 
 # ============================================================
+# UTILITAIRES AFFICHAGE
+# ============================================================
+
+# Longueur visible d'une string (sans ANSI escape codes, ajuste pour emojis 2-wide)
+visible_len() {
+  local stripped
+  stripped=$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g')
+  # Compter les caractères multi-width courants (emojis) — approximation simple
+  local emoji_count
+  emoji_count=$(printf '%s' "$stripped" | grep -oP '[\x{1F300}-\x{1F9FF}]|✅|🔄|✓|✗' 2>/dev/null | wc -l || echo "0")
+  echo $(( ${#stripped} + emoji_count ))
+}
+
+# Dessine une barre de progression : progress_bar <current> <total> <width>
+progress_bar() {
+  local current="${1:-0}" total="${2:-1}" width="${3:-30}"
+  [ "$total" -eq 0 ] && total=1
+  local pct=$((current * 100 / total))
+  [ $pct -gt 100 ] && pct=100
+  local filled=$((pct * width / 100))
+  local empty=$((width - filled))
+  local bar=""
+  local i
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do bar+="░"; done
+
+  local color="$CYAN"
+  [ $pct -ge 50 ] && color="$YELLOW"
+  [ $pct -ge 80 ] && color="$GREEN"
+  printf "${color}%s${NC} %3d%%" "$bar" "$pct"
+}
+
+# Calcule la durée écoulée en format lisible depuis un timestamp ISO
+format_duration_since() {
+  local start_ts="$1"
+  local start_epoch end_epoch
+  start_epoch=$(date -d "$start_ts" +%s 2>/dev/null || echo "0")
+  end_epoch=$(date +%s)
+  [ "$start_epoch" -eq 0 ] && echo "—" && return
+  local diff=$((end_epoch - start_epoch))
+  local hours=$((diff / 3600))
+  local minutes=$(( (diff % 3600) / 60 ))
+  if [ $hours -gt 0 ]; then
+    printf "%dh%02dm" "$hours" "$minutes"
+  else
+    printf "%dm" "$minutes"
+  fi
+}
+
+# Estime le temps restant basé sur la durée moyenne par feature
+estimate_remaining() {
+  local dir="$1"
+  local state_file="$dir/.orc/state.json"
+  [ -f "$state_file" ] || return
+  if ! command -v jq &> /dev/null; then return; fi
+
+  local feat_count timeline_len run_started
+  feat_count=$(jq -r '.feature_count // 0' "$state_file")
+  run_started=$(jq -r '.run_started_at // ""' "$state_file")
+  timeline_len=$(jq -r '.features_timeline | length' "$state_file" 2>/dev/null || echo "0")
+
+  [ "$feat_count" -eq 0 ] && return
+  [ -z "$run_started" ] && return
+
+  local start_epoch now_epoch
+  start_epoch=$(date -d "$run_started" +%s 2>/dev/null || echo "0")
+  now_epoch=$(date +%s)
+  [ "$start_epoch" -eq 0 ] && return
+
+  local elapsed=$((now_epoch - start_epoch))
+  local avg_per_feature=$((elapsed / feat_count))
+
+  # Compter les features restantes dans la roadmap
+  local roadmap="$dir/project/.orc/ROADMAP.md"
+  [ -f "$roadmap" ] || return
+  local remaining
+  remaining=$(grep -c '^\- \[ \]' "$roadmap" 2>/dev/null || echo "0")
+  [ "$remaining" -eq 0 ] && return
+
+  local eta_s=$((avg_per_feature * remaining))
+  local eta_h=$((eta_s / 3600))
+  local eta_m=$(( (eta_s % 3600) / 60 ))
+
+  if [ $eta_h -gt 0 ]; then
+    printf "~%dh%02dm" "$eta_h" "$eta_m"
+  else
+    printf "~%dm" "$eta_m"
+  fi
+}
+
+# ============================================================
 # COMMANDE : status
 # ============================================================
 
@@ -292,10 +383,10 @@ cmd_status() {
 
   local has_projects=false
 
-  printf "\n${BOLD}%-20s %-10s %-12s %-8s %-10s %s${NC}\n" \
-    "PROJET" "STATUS" "FEATURES" "ÉCHECS" "COÛT" "ROADMAP"
-  printf "%-20s %-10s %-12s %-8s %-10s %s\n" \
-    "────────────────────" "──────────" "────────────" "────────" "──────────" "──────────"
+  printf "\n${BOLD}%-20s %-10s %-12s %-8s %-10s %-14s %s${NC}\n" \
+    "PROJET" "STATUS" "FEATURES" "ÉCHECS" "COÛT" "PROGRESSION" "ROADMAP"
+  printf "%-20s %-10s %-12s %-8s %-10s %-14s %s\n" \
+    "────────────────────" "──────────" "────────────" "────────" "──────────" "──────────────" "──────────"
 
   for proj_dir in "$PROJECTS_DIR"/*/; do
     [ -d "$proj_dir" ] || continue
@@ -332,19 +423,28 @@ cmd_status() {
       cost="\$$raw_cost"
     fi
 
-    local remaining="—"
+    local remaining="—" pct_str="—"
     if [ -f "$proj_dir/project/.orc/ROADMAP.md" ]; then
-      local todo
+      local done_count todo
+      done_count=$(grep -c '^\- \[x\]' "$proj_dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
       todo=$(grep -c '^\- \[ \]' "$proj_dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
+      local total_feats=$((done_count + todo))
       if [ "$todo" -eq 0 ] && [ "$status" = "done" ]; then
         remaining="terminé"
-      else
+        pct_str="${GREEN}100%${NC}"
+      elif [ "$total_feats" -gt 0 ]; then
+        local pct=$((done_count * 100 / total_feats))
         remaining="${todo} restantes"
+        local pct_color="$CYAN"
+        [ $pct -ge 50 ] && pct_color="$YELLOW"
+        [ $pct -ge 80 ] && pct_color="$GREEN"
+        pct_str="${pct_color}${pct}%${NC}"
       fi
     fi
 
-    printf "%-20s ${status_color}%-10s${NC} %-12s %-8s %-10s %s\n" \
-      "$proj_name" "$status" "${feat_count}/${max_feat}" "$failures" "$cost" "$remaining"
+    printf "%-20s ${status_color}%-10s${NC} %-12s %-8s %-10s " \
+      "$proj_name" "$status" "${feat_count}/${max_feat}" "$failures" "$cost"
+    printf "${pct_str}%-8s %s\n" "" "$remaining"
   done
 
   if [ "$has_projects" = false ]; then
@@ -365,14 +465,28 @@ cmd_status_detail() {
   printf "${BOLD}Projet : %s${NC}\n" "$name"
   printf "  Dossier : %s\n" "$dir"
 
+  # Status + durée
+  local is_done=false
   if [ -f "$dir/project/DONE.md" ]; then
     printf "  Status : ${GREEN}terminé${NC}\n"
+    is_done=true
   elif is_running "$name"; then
     local pid
     pid=$(cat "$dir/.orc/.pid")
     printf "  Status : ${CYAN}en cours${NC} (PID %s)\n" "$pid"
   else
     printf "  Status : ${YELLOW}arrêté${NC}\n"
+  fi
+
+  # Durée du run
+  if [ -f "$dir/.orc/state.json" ] && command -v jq &> /dev/null; then
+    local run_started
+    run_started=$(jq -r '.run_started_at // ""' "$dir/.orc/state.json" 2>/dev/null)
+    if [ -n "$run_started" ] && [ "$run_started" != "null" ]; then
+      local duration
+      duration=$(format_duration_since "$run_started")
+      printf "  Durée : %s\n" "$duration"
+    fi
   fi
 
   if [ -f "$dir/.orc/state.json" ]; then
@@ -388,7 +502,13 @@ cmd_status_detail() {
     invocations=$(jq -r '.invocations // 0' "$dir/.orc/tokens.json" 2>/dev/null)
     tokens_in=$(jq -r '.total_input_tokens // 0' "$dir/.orc/tokens.json" 2>/dev/null)
     tokens_out=$(jq -r '.total_output_tokens // 0' "$dir/.orc/tokens.json" 2>/dev/null)
-    printf "  Coût : \$%s (%s invocations, %s in / %s out)\n" "$cost" "$invocations" "$tokens_in" "$tokens_out"
+    local budget_str=""
+    if [ -f "$dir/.orc/config.sh" ]; then
+      local max_budget
+      max_budget=$(grep -oP 'MAX_BUDGET_USD="\K[^"]+' "$dir/.orc/config.sh" 2>/dev/null || echo "")
+      [ -n "$max_budget" ] && budget_str=" / \$$max_budget budget"
+    fi
+    printf "  Coût : \$%s%s (%s invocations)\n" "$cost" "$budget_str" "$invocations"
   fi
 
   # Modèle
@@ -397,11 +517,45 @@ cmd_status_detail() {
     printf "  Modèle : %s\n" "$(cat "$model_file")"
   fi
 
+  # Progress bar + roadmap
   if [ -f "$dir/project/.orc/ROADMAP.md" ]; then
-    local done_count todo
+    local done_count todo total_feats
     done_count=$(grep -c '^\- \[x\]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
     todo=$(grep -c '^\- \[ \]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
-    printf "  Roadmap : %s faites, %s restantes\n" "$done_count" "$todo"
+    total_feats=$((done_count + todo))
+    echo ""
+    printf "  Progress  "
+    progress_bar "$done_count" "$total_feats" 30
+    printf " (%s/%s features)\n" "$done_count" "$total_feats"
+  fi
+
+  # Feature en cours + ETA
+  if [ -f "$dir/.orc/state.json" ] && command -v jq &> /dev/null; then
+    local cur_feat cur_phase
+    cur_feat=$(jq -r '.current_feature // ""' "$dir/.orc/state.json" 2>/dev/null)
+    cur_phase=$(jq -r '.current_phase // ""' "$dir/.orc/state.json" 2>/dev/null)
+    if [ -n "$cur_feat" ] && [ "$cur_feat" != "null" ] && [ "$cur_feat" != "" ]; then
+      printf "  En cours  ${CYAN}%s${NC}" "$cur_feat"
+      [ -n "$cur_phase" ] && [ "$cur_phase" != "null" ] && printf " ${DIM}(%s)${NC}" "$cur_phase"
+      printf "\n"
+    fi
+
+    local eta
+    eta=$(estimate_remaining "$dir")
+    if [ -n "$eta" ]; then
+      printf "  ETA       %s restantes estimées\n" "$eta"
+    fi
+  fi
+
+  # Functional check
+  if [ -f "$dir/.orc/state.json" ] && command -v jq &> /dev/null; then
+    local func_check
+    func_check=$(jq -r '.functional_check_passed // "null"' "$dir/.orc/state.json" 2>/dev/null)
+    if [ "$func_check" = "true" ]; then
+      printf "  App       ${GREEN}fonctionnelle ✓${NC}\n"
+    elif [ "$func_check" = "false" ]; then
+      printf "  App       ${RED}non fonctionnelle ✗${NC}\n"
+    fi
   fi
 
   if [ -f "$dir/.orc/logs/orchestrator.log" ]; then
@@ -830,12 +984,231 @@ cmd_agent_help() {
   printf "  ${CYAN}orc agent start <nom>${NC}             Lancer en background\n"
   printf "  ${CYAN}orc agent stop <nom>${NC}              Arrêter proprement\n"
   printf "  ${CYAN}orc agent restart <nom>${NC}           Redémarrer\n"
-  printf "  ${CYAN}orc agent status${NC}                  Vue d'ensemble\n"
-  printf "  ${CYAN}orc agent status <nom>${NC}            Détail d'un projet\n"
+  printf "  ${CYAN}orc agent status${NC}                  Vue d'ensemble (avec progression)\n"
+  printf "  ${CYAN}orc agent status <nom>${NC}            Détail + barre de progression\n"
+  printf "  ${CYAN}orc agent dashboard <nom>${NC}         Dashboard live (rafraîchit toutes les 5s)\n"
   printf "  ${CYAN}orc agent logs <nom>${NC}              Logs temps réel\n"
   printf "  ${CYAN}orc agent logs <nom> --full${NC}       Log complet\n"
   printf "  ${CYAN}orc agent update${NC}                  Mettre à jour le template\n"
   echo ""
+}
+
+# ============================================================
+# COMMANDE : dashboard (live monitoring)
+# ============================================================
+
+cmd_dashboard() {
+  local name="${1:-}"
+  [ -z "$name" ] && die "Usage : orc dashboard <nom>"
+  require_project "$name"
+
+  local dir
+  dir=$(project_dir "$name")
+  local state_file="$dir/.orc/state.json"
+  local tokens_file="$dir/.orc/tokens.json"
+  local roadmap_file="$dir/project/.orc/ROADMAP.md"
+  local logfile="$dir/.orc/logs/orchestrator.log"
+  local config_file="$dir/.orc/config.sh"
+
+  local refresh=5
+  if [ "${2:-}" = "--refresh" ] && [ -n "${3:-}" ]; then
+    refresh="$3"
+  fi
+
+  printf "${DIM}Dashboard live — rafraîchissement toutes les %ss (Ctrl+C pour quitter)${NC}\n" "$refresh"
+  sleep 1
+
+  while true; do
+    clear
+
+    # === HEADER ===
+    local status status_color
+    if [ -f "$dir/project/DONE.md" ]; then
+      status="terminé"
+      status_color="$GREEN"
+    elif is_running "$name"; then
+      status="en cours"
+      status_color="$CYAN"
+    else
+      status="arrêté"
+      status_color="$YELLOW"
+    fi
+
+    local duration="—"
+    if [ -f "$state_file" ] && command -v jq &> /dev/null; then
+      local run_started
+      run_started=$(jq -r '.run_started_at // ""' "$state_file" 2>/dev/null)
+      if [ -n "$run_started" ] && [ "$run_started" != "null" ]; then
+        duration=$(format_duration_since "$run_started")
+      fi
+    fi
+
+    printf "${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}\n"
+    printf "${BOLD}║${NC}  ${BOLD}ORC — %s${NC}" "$name"
+    # Padding to align right
+    local header_left="ORC — $name"
+    local header_right="$status | $duration"
+    local pad=$((56 - ${#header_left} - ${#header_right}))
+    [ $pad -lt 1 ] && pad=1
+    printf "%*s" "$pad" ""
+    printf "${status_color}%s${NC} | ${CYAN}%s${NC}" "$status" "$duration"
+    printf "  ${BOLD}║${NC}\n"
+    printf "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}\n"
+
+    # === PROGRESS + METRICS ===
+    local feat_count=0 total_failures=0 max_feat="?"
+    if [ -f "$state_file" ] && command -v jq &> /dev/null; then
+      feat_count=$(jq -r '.feature_count // 0' "$state_file" 2>/dev/null)
+      total_failures=$(jq -r '.total_failures // 0' "$state_file" 2>/dev/null)
+    fi
+    if [ -f "$config_file" ]; then
+      max_feat=$(grep -oP 'MAX_FEATURES=\K\d+' "$config_file" 2>/dev/null || echo "?")
+    fi
+
+    local cost="\$0.00" budget_str=""
+    if [ -f "$tokens_file" ] && command -v jq &> /dev/null; then
+      local raw_cost
+      raw_cost=$(jq -r '.total_cost_usd // 0' "$tokens_file" 2>/dev/null)
+      cost="\$$raw_cost"
+    fi
+    if [ -f "$config_file" ]; then
+      local max_budget
+      max_budget=$(grep -oP 'MAX_BUDGET_USD="\K[^"]+' "$config_file" 2>/dev/null || echo "")
+      [ -n "$max_budget" ] && budget_str=" / \$$max_budget"
+    fi
+
+    local done_count=0 todo_count=0 total_feats=0
+    if [ -f "$roadmap_file" ]; then
+      done_count=$(grep -c '^\- \[x\]' "$roadmap_file" 2>/dev/null || echo "0")
+      todo_count=$(grep -c '^\- \[ \]' "$roadmap_file" 2>/dev/null || echo "0")
+      total_feats=$((done_count + todo_count))
+    fi
+
+    # Progress bar
+    printf "${BOLD}║${NC}  Progress  "
+    progress_bar "$done_count" "$total_feats" 30
+    printf " (%s/%s)" "$done_count" "$total_feats"
+    local pbar_pad=$((10 - ${#done_count} - ${#total_feats}))
+    [ $pbar_pad -lt 0 ] && pbar_pad=0
+    printf "%*s${BOLD}║${NC}\n" "$pbar_pad" ""
+
+    # Current feature
+    local cur_feat="" cur_phase=""
+    if [ -f "$state_file" ] && command -v jq &> /dev/null; then
+      cur_feat=$(jq -r '.current_feature // ""' "$state_file" 2>/dev/null)
+      cur_phase=$(jq -r '.current_phase // ""' "$state_file" 2>/dev/null)
+    fi
+    if [ -n "$cur_feat" ] && [ "$cur_feat" != "null" ] && [ "$cur_feat" != "" ]; then
+      local phase_str=""
+      [ -n "$cur_phase" ] && [ "$cur_phase" != "null" ] && phase_str=" ($cur_phase)"
+      local feat_display="${cur_feat}${phase_str}"
+      # Tronquer si trop long
+      [ ${#feat_display} -gt 50 ] && feat_display="${feat_display:0:47}..."
+      printf "${BOLD}║${NC}  Phase     ${CYAN}#%s — %s${NC}" "$feat_count" "$feat_display"
+      local feat_pad=$((49 - ${#feat_count} - ${#feat_display}))
+      [ $feat_pad -lt 0 ] && feat_pad=0
+      printf "%*s${BOLD}║${NC}\n" "$feat_pad" ""
+    else
+      printf "${BOLD}║${NC}  Phase     ${DIM}en attente${NC}%*s${BOLD}║${NC}\n" 40 ""
+    fi
+
+    # Cost
+    local cost_display="$cost$budget_str"
+    printf "${BOLD}║${NC}  Coût      ${YELLOW}%s${NC}" "$cost_display"
+    local cost_pad=$((49 - ${#cost_display}))
+    [ $cost_pad -lt 0 ] && cost_pad=0
+    printf "%*s${BOLD}║${NC}\n" "$cost_pad" ""
+
+    # Failures + ETA
+    local eta=""
+    eta=$(estimate_remaining "$dir")
+    local fail_eta="Échecs: $total_failures"
+    [ -n "$eta" ] && fail_eta="$fail_eta | ETA: $eta"
+    printf "${BOLD}║${NC}  Infos     %s" "$fail_eta"
+    local info_pad=$((49 - ${#fail_eta}))
+    [ $info_pad -lt 0 ] && info_pad=0
+    printf "%*s${BOLD}║${NC}\n" "$info_pad" ""
+
+    # Functional check
+    if [ -f "$state_file" ] && command -v jq &> /dev/null; then
+      local func_check
+      func_check=$(jq -r '.functional_check_passed // "null"' "$state_file" 2>/dev/null)
+      if [ "$func_check" = "true" ]; then
+        printf "${BOLD}║${NC}  App       ${GREEN}fonctionnelle ✓${NC}%*s${BOLD}║${NC}\n" 34 ""
+      elif [ "$func_check" = "false" ]; then
+        printf "${BOLD}║${NC}  App       ${RED}non fonctionnelle ✗${NC}%*s${BOLD}║${NC}\n" 30 ""
+      fi
+    fi
+
+    printf "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}\n"
+
+    # === ROADMAP ===
+    printf "${BOLD}║${NC}  ${BOLD}ROADMAP${NC}%*s${BOLD}║${NC}\n" 53 ""
+    if [ -f "$roadmap_file" ]; then
+      local line_count=0
+      while IFS= read -r line; do
+        if [[ "$line" =~ ^-\ \[x\] ]]; then
+          local feat_text="${line#- [x] }"
+          feat_text=$(echo "$feat_text" | sed 's/ |.*//')
+          [ ${#feat_text} -gt 50 ] && feat_text="${feat_text:0:47}..."
+          printf "${BOLD}║${NC}  ${GREEN}  ✅ %s${NC}" "$feat_text"
+          local t_pad=$((53 - ${#feat_text}))
+          [ $t_pad -lt 0 ] && t_pad=0
+          printf "%*s${BOLD}║${NC}\n" "$t_pad" ""
+          line_count=$((line_count + 1))
+        elif [[ "$line" =~ ^-\ \[\ \] ]]; then
+          local feat_text="${line#- [ ] }"
+          feat_text=$(echo "$feat_text" | sed 's/ |.*//')
+          [ ${#feat_text} -gt 50 ] && feat_text="${feat_text:0:47}..."
+          # First unchecked = en cours
+          if [ "$line_count" -eq "$done_count" ]; then
+            printf "${BOLD}║${NC}  ${CYAN}  🔄 %s${NC}" "$feat_text"
+          else
+            printf "${BOLD}║${NC}    ⬚ %s" "$feat_text"
+          fi
+          local t_pad=$((53 - ${#feat_text}))
+          [ $t_pad -lt 0 ] && t_pad=0
+          printf "%*s${BOLD}║${NC}\n" "$t_pad" ""
+          line_count=$((line_count + 1))
+        elif [[ "$line" =~ ^##\  ]]; then
+          local section="${line#\#\# }"
+          [ ${#section} -gt 54 ] && section="${section:0:51}..."
+          printf "${BOLD}║${NC}  ${BOLD}%s${NC}" "$section"
+          local s_pad=$((56 - ${#section}))
+          [ $s_pad -lt 0 ] && s_pad=0
+          printf "%*s${BOLD}║${NC}\n" "$s_pad" ""
+        fi
+      done < "$roadmap_file"
+    fi
+
+    printf "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}\n"
+
+    # === ACTIVITY LOG ===
+    printf "${BOLD}║${NC}  ${BOLD}DERNIÈRE ACTIVITÉ${NC}%*s${BOLD}║${NC}\n" 43 ""
+    if [ -f "$logfile" ]; then
+      tail -6 "$logfile" 2>/dev/null | while IFS= read -r log_line; do
+        # Extraire timestamp court et message
+        local ts_short msg
+        ts_short=$(echo "$log_line" | grep -oP '^\[\K\d{4}-\d{2}-\d{2} \d{2}:\d{2}' 2>/dev/null || echo "")
+        if [ -n "$ts_short" ]; then
+          local time_only="${ts_short##* }"
+          msg=$(echo "$log_line" | sed 's/^\[[^]]*\] \[[^]]*\] //')
+          [ ${#msg} -gt 46 ] && msg="${msg:0:43}..."
+          printf "${BOLD}║${NC}  ${DIM}%s${NC}  %s" "$time_only" "$msg"
+          local l_pad=$((52 - ${#time_only} - ${#msg}))
+          [ $l_pad -lt 0 ] && l_pad=0
+          printf "%*s${BOLD}║${NC}\n" "$l_pad" ""
+        fi
+      done
+    else
+      printf "${BOLD}║${NC}  ${DIM}Pas encore de logs${NC}%*s${BOLD}║${NC}\n" 42 ""
+    fi
+
+    printf "${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}\n"
+    printf "${DIM}Rafraîchissement : %ss | Ctrl+C pour quitter${NC}\n" "$refresh"
+
+    sleep "$refresh"
+  done
 }
 
 # ============================================================
@@ -847,13 +1220,14 @@ agent_dispatch() {
   shift || true
 
   case "$subcmd" in
-    new)     cmd_new "$@" ;;
-    start)   cmd_start "$@" ;;
-    stop)    cmd_stop "$@" ;;
-    restart) cmd_restart "$@" ;;
-    status)  cmd_status "$@" ;;
-    logs)    cmd_logs "$@" ;;
-    update)  cmd_update ;;
+    new)       cmd_new "$@" ;;
+    start)     cmd_start "$@" ;;
+    stop)      cmd_stop "$@" ;;
+    restart)   cmd_restart "$@" ;;
+    status)    cmd_status "$@" ;;
+    logs)      cmd_logs "$@" ;;
+    dashboard) cmd_dashboard "$@" ;;
+    update)    cmd_update ;;
     help|-h|--help) cmd_agent_help ;;
     *) die "Commande inconnue : agent $subcmd. Voir : orc agent help" ;;
   esac

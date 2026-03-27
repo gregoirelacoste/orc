@@ -62,6 +62,10 @@ DEV_COMMAND="npm run dev"                # Commande serveur dev
 LINT_COMMAND="npm run lint"              # Commande lint (vide = désactivé)
 QUALITY_COMMAND=""                       # Commande quality gate post-tests (vide = désactivé)
                                          # Ex: "npm run lighthouse -- --budget=80" ou "npx bundle-size-check"
+FUNCTIONAL_CHECK_COMMAND=""              # Vérification fonctionnelle post-feature (vide = désactivé)
+                                         # L'app DOIT être fonctionnelle après chaque feature.
+                                         # Ex: "npm start -- --check" ou "curl -sf http://localhost:3000/health"
+                                         # ou "docker compose up -d && sleep 5 && curl -sf localhost:3000 && docker compose down"
 CLAUDE_MODEL=""                          # Modèle Claude (vide = défaut CLI). Ex: "claude-sonnet-4-6-20250514"
 
 # === BUDGET ===

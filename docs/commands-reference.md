@@ -41,12 +41,29 @@ Stop + start en une commande.
 
 ### `orc agent status [nom]`
 
-Sans argument : vue d'ensemble de tous les projets (running/stopped, features, coût).
-Avec argument : détail d'un projet (progression, feature en cours, coûts détaillés).
+Sans argument : vue d'ensemble de tous les projets (running/stopped, features, coût, progression %).
+Avec argument : détail d'un projet avec barre de progression, feature en cours, phase, ETA estimée, état fonctionnel de l'app.
 
 ```bash
-orc agent status          # Tous les projets
-orc agent status mon-app  # Détail d'un projet
+orc agent status          # Tous les projets (avec % progression)
+orc agent status mon-app  # Détail + barre de progression + ETA
+```
+
+### `orc agent dashboard <nom> [--refresh N]`
+
+Dashboard live auto-refresh (toutes les 5s par défaut) avec :
+- Barre de progression visuelle
+- Feature en cours et phase
+- Coût / budget
+- ETA estimée (basée sur la durée moyenne par feature)
+- Roadmap colorée (✅ done, 🔄 en cours, ⬚ à faire)
+- Dernière activité (6 dernières lignes du log)
+- État fonctionnel de l'app (si `FUNCTIONAL_CHECK_COMMAND` configuré)
+
+```bash
+orc dashboard mon-app             # Dashboard live (refresh 5s)
+orc dash mon-app                  # Raccourci
+orc agent dashboard mon-app --refresh 10  # Refresh toutes les 10s
 ```
 
 ### `orc agent logs <nom> [--full]`
@@ -139,6 +156,8 @@ Met à jour le template orc.
 |---|---|
 | `orc s` | `orc agent status` |
 | `orc s <nom>` | `orc agent status <nom>` |
+| `orc dash <nom>` | `orc dashboard <nom>` |
+| `orc db <nom>` | `orc dashboard <nom>` |
 | `orc l <nom>` | `orc agent logs <nom>` |
 | `orc r` | `orc roadmap` |
 
