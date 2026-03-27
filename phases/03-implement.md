@@ -2,13 +2,13 @@ FEATURE À IMPLÉMENTER : {{FEATURE_NAME}}
 
 ### Avant de coder — consultation de l'index (OBLIGATOIRE)
 
-1. **codebase/INDEX.md** — la carte sémantique du projet (TOUJOURS lire en premier).
+1. **.orc/codebase/INDEX.md** — la carte sémantique du projet (TOUJOURS lire en premier).
    Identifie les sections pertinentes pour cette feature, puis lis SEULEMENT
    les fichiers de détail nécessaires :
-   - `codebase/modules.md` si tu as besoin de connaître les exports existants
-   - `codebase/utilities.md` si tu pourrais réutiliser un helper
-   - `codebase/integrations.md` si la feature touche une API/service
-   - `codebase/data-models.md` si tu manipules des données
+   - `.orc/codebase/modules.md` si tu as besoin de connaître les exports existants
+   - `.orc/codebase/utilities.md` si tu pourrais réutiliser un helper
+   - `.orc/codebase/integrations.md` si la feature touche une API/service
+   - `.orc/codebase/data-models.md` si tu manipules des données
    - `codebase/architecture.md` si tu dois comprendre un choix technique
    - `codebase/security.md` si la feature a un aspect sécurité
    **NE LIS PAS tous les fichiers — uniquement ceux pertinents pour cette feature.**
@@ -25,7 +25,7 @@ FEATURE À IMPLÉMENTER : {{FEATURE_NAME}}
 ### Anti-duplication — checklist AVANT de créer du code
 
 Avant de créer une nouvelle fonction, un nouveau composant ou un nouveau helper :
-- [ ] Vérifie dans codebase/INDEX.md puis le fichier de détail qu'il n'existe pas déjà
+- [ ] Vérifie dans .orc/codebase/INDEX.md puis le fichier de détail qu'il n'existe pas déjà
 - [ ] Vérifie dans stack-conventions.md que le pattern est cohérent
 - [ ] Si une utility similaire existe → l'enrichir plutôt qu'en créer une nouvelle
 - [ ] Si un composant proche existe → le rendre paramétrique plutôt que dupliquer

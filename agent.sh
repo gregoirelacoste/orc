@@ -142,7 +142,7 @@ cmd_new() {
     fi
 
     cp "$resolved_brief" "$dir/BRIEF.md"
-    cp "$resolved_brief" "$dir/project/BRIEF.md"
+    cp "$resolved_brief" "$dir/project/.orc/BRIEF.md"
     printf "  ${GREEN}✓${NC} Brief copié depuis %s\n" "$brief_file"
   else
     # Mode interactif — Claude rédige le brief
@@ -159,7 +159,7 @@ L'utilisateur crée un projet appelé \"$name\".
 Pose les questions une par une. Écris le résultat dans BRIEF.md." --max-turns 40 )
 
     if [ -f "$dir/BRIEF.md" ]; then
-      cp "$dir/BRIEF.md" "$dir/project/BRIEF.md"
+      cp "$dir/BRIEF.md" "$dir/project/.orc/BRIEF.md"
       printf "\n  ${GREEN}✓${NC} Brief rédigé\n"
     else
       printf "\n  ${YELLOW}⚠${NC} Brief non créé. Rédige-le manuellement :\n"
@@ -328,9 +328,9 @@ cmd_status() {
 
     # Roadmap
     local remaining="—"
-    if [ -f "$proj_dir/project/ROADMAP.md" ]; then
+    if [ -f "$proj_dir/project/.orc/ROADMAP.md" ]; then
       local todo
-      todo=$(grep -c '^\- \[ \]' "$proj_dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+      todo=$(grep -c '^\- \[ \]' "$proj_dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
       if [ "$todo" -eq 0 ] && [ "$status" = "done" ]; then
         remaining="terminé"
       else
@@ -390,10 +390,10 @@ cmd_status_detail() {
   fi
 
   # Roadmap
-  if [ -f "$dir/project/ROADMAP.md" ]; then
+  if [ -f "$dir/project/.orc/ROADMAP.md" ]; then
     local done todo
-    done=$(grep -c '^\- \[x\]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
-    todo=$(grep -c '^\- \[ \]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+    done=$(grep -c '^\- \[x\]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
+    todo=$(grep -c '^\- \[ \]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
     printf "  Roadmap : %s faites, %s restantes\n" "$done" "$todo"
   fi
 
