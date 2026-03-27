@@ -49,8 +49,9 @@ orc_help() {
   printf "    ${CYAN}orc agent new <nom> --brief x.md${NC}  Créer depuis un brief (+ clarification IA)\n"
   printf "    ${CYAN}orc agent start <nom>${NC}             Lancer en background\n"
   printf "    ${CYAN}orc agent stop <nom>${NC}              Arrêter proprement\n"
-  printf "    ${CYAN}orc agent status${NC}                  Vue d'ensemble\n"
-  printf "    ${CYAN}orc agent status <nom>${NC}            Détail d'un projet\n"
+  printf "    ${CYAN}orc agent status${NC}                  Vue d'ensemble (avec progression)\n"
+  printf "    ${CYAN}orc agent status <nom>${NC}            Détail + barre de progression + ETA\n"
+  printf "    ${CYAN}orc dashboard <nom>${NC}               Dashboard live (auto-refresh)\n"
   printf "    ${CYAN}orc agent logs <nom>${NC}              Logs temps réel\n"
   echo ""
   printf "  ${BOLD}Roadmap :${NC}\n"
@@ -75,7 +76,7 @@ orc_help() {
   printf "    ${CYAN}orc docs${NC}                          Index de la documentation\n"
   printf "    ${CYAN}orc docs <sujet>${NC}                  Ouvrir une page (getting-started, commands, etc.)\n"
   echo ""
-  printf "  ${DIM}Raccourcis : 'orc s' = status, 'orc l <nom>' = logs, 'orc r' = roadmap${NC}\n"
+  printf "  ${DIM}Raccourcis : 'orc s' = status, 'orc l <nom>' = logs, 'orc r' = roadmap, 'orc dash <nom>' = dashboard${NC}\n"
   echo ""
 }
 
@@ -174,6 +175,10 @@ case "$COMMAND" in
   status|s)
     source "$ORC_DIR/orc-agent.sh"
     cmd_status "$@"
+    ;;
+  dashboard|dash|db)
+    source "$ORC_DIR/orc-agent.sh"
+    cmd_dashboard "$@"
     ;;
   logs|l)
     source "$ORC_DIR/orc-agent.sh"

@@ -43,6 +43,13 @@ EVOLVE_CYCLES=0
 AI_ROADMAP_ADDS=0
 STATE_FILE="$SCRIPT_DIR/.orc/state.json"
 
+# === TRACKING ENRICHI ===
+CURRENT_FEATURE=""
+CURRENT_PHASE=""
+PHASE_STARTED_AT=""
+RUN_STARTED_AT=$(date -Iseconds)
+FEATURES_TIMELINE="[]"
+
 # === TRACKING TOKENS ===
 TOKENS_FILE="$SCRIPT_DIR/.orc/tokens.json"
 TOTAL_INPUT_TOKENS=0
@@ -98,9 +105,45 @@ log() {
 # Sauvegarde l'état des compteurs (survit à exec et crash)
 save_state() {
   mkdir -p "$(dirname "$STATE_FILE")"
-  cat > "$STATE_FILE" << STATEEOF
+  if command -v jq &> /dev/null; then
+    # Version enrichie avec tracking complet
+    local timeline_json="$FEATURES_TIMELINE"
+    [ -z "$timeline_json" ] && timeline_json="[]"
+    local current_feat_safe
+    current_feat_safe=$(printf '%s' "$CURRENT_FEATURE" | jq -Rs '.' 2>/dev/null || echo '""')
+    local current_phase_safe
+    current_phase_safe=$(printf '%s' "$CURRENT_PHASE" | jq -Rs '.' 2>/dev/null || echo '""')
+    jq -n \
+      --argjson feature_count "$FEATURE_COUNT" \
+      --argjson epic_feature_count "$EPIC_FEATURE_COUNT" \
+      --argjson total_failures "$TOTAL_FAILURES" \
+      --argjson evolve_cycles "$EVOLVE_CYCLES" \
+      --argjson ai_roadmap_adds "$AI_ROADMAP_ADDS" \
+      --argjson current_feature "$current_feat_safe" \
+      --argjson current_phase "$current_phase_safe" \
+      --arg phase_started_at "${PHASE_STARTED_AT:-}" \
+      --arg run_started_at "${RUN_STARTED_AT:-}" \
+      --argjson features_timeline "$timeline_json" \
+      --argjson functional_check_passed "${LAST_FUNCTIONAL_CHECK:-null}" \
+      '{
+        feature_count: $feature_count,
+        epic_feature_count: $epic_feature_count,
+        total_failures: $total_failures,
+        evolve_cycles: $evolve_cycles,
+        ai_roadmap_adds: $ai_roadmap_adds,
+        current_feature: $current_feature,
+        current_phase: $current_phase,
+        phase_started_at: $phase_started_at,
+        run_started_at: $run_started_at,
+        features_timeline: $features_timeline,
+        functional_check_passed: $functional_check_passed
+      }' > "$STATE_FILE"
+  else
+    # Fallback sans jq — format simple
+    cat > "$STATE_FILE" << STATEEOF
 {"feature_count":$FEATURE_COUNT,"epic_feature_count":$EPIC_FEATURE_COUNT,"total_failures":$TOTAL_FAILURES,"evolve_cycles":$EVOLVE_CYCLES,"ai_roadmap_adds":$AI_ROADMAP_ADDS}
 STATEEOF
+  fi
 }
 
 # Restaure l'état si disponible
@@ -111,7 +154,108 @@ restore_state() {
     TOTAL_FAILURES=$(jq -r '.total_failures // 0' "$STATE_FILE")
     EVOLVE_CYCLES=$(jq -r '.evolve_cycles // 0' "$STATE_FILE")
     AI_ROADMAP_ADDS=$(jq -r '.ai_roadmap_adds // 0' "$STATE_FILE")
+    # Restaurer le tracking enrichi
+    CURRENT_FEATURE=$(jq -r '.current_feature // ""' "$STATE_FILE")
+    CURRENT_PHASE=$(jq -r '.current_phase // ""' "$STATE_FILE")
+    PHASE_STARTED_AT=$(jq -r '.phase_started_at // ""' "$STATE_FILE")
+    local saved_run_started
+    saved_run_started=$(jq -r '.run_started_at // ""' "$STATE_FILE")
+    [ -n "$saved_run_started" ] && RUN_STARTED_AT="$saved_run_started"
+    FEATURES_TIMELINE=$(jq -c '.features_timeline // []' "$STATE_FILE")
     log INFO "État restauré : features=$FEATURE_COUNT, échecs=$TOTAL_FAILURES, evolve_cycles=$EVOLVE_CYCLES"
+  fi
+}
+
+# Met à jour le tracking de phase courante
+update_phase_tracking() {
+  local phase="$1"
+  local feature="${2:-}"
+  CURRENT_PHASE="$phase"
+  PHASE_STARTED_AT=$(date -Iseconds)
+  [ -n "$feature" ] && CURRENT_FEATURE="$feature"
+}
+
+# Ajoute une entrée à la timeline des features
+timeline_add() {
+  local name="$1" status="$2" fix_attempts="${3:-0}"
+  local ts
+  ts=$(date -Iseconds)
+  if command -v jq &> /dev/null; then
+    FEATURES_TIMELINE=$(echo "$FEATURES_TIMELINE" | jq -c \
+      --arg name "$name" --arg status "$status" --arg ts "$ts" --argjson fix "$fix_attempts" \
+      '. + [{"name": $name, "started": $ts, "status": $status, "fix_attempts": $fix}]')
+  fi
+}
+
+# Met à jour le dernier élément de la timeline
+timeline_update_last() {
+  local status="$1" fix_attempts="${2:-0}"
+  local ts
+  ts=$(date -Iseconds)
+  if command -v jq &> /dev/null; then
+    FEATURES_TIMELINE=$(echo "$FEATURES_TIMELINE" | jq -c \
+      --arg status "$status" --arg ts "$ts" --argjson fix "$fix_attempts" \
+      'if length > 0 then .[-1].ended = $ts | .[-1].status = $status | .[-1].fix_attempts = $fix else . end')
+  fi
+}
+
+# Marque une feature comme cochée dans ROADMAP.md (fiable, sed-based)
+mark_feature_done_bash() {
+  local feature_name="$1"
+  local roadmap="$PROJECT_DIR/.orc/ROADMAP.md"
+  [ -f "$roadmap" ] || return 0
+  # Échappe les caractères spéciaux regex dans le nom de la feature
+  local escaped_name
+  escaped_name=$(printf '%s' "$feature_name" | sed 's/[.[\*^$()+?{|\\]/\\&/g')
+  # Remplacer la première occurrence unchecked contenant ce nom
+  sed -i "0,/^\- \[ \] ${escaped_name}/s/^\- \[ \] \(${escaped_name}\)/- [x] \1/" "$roadmap" 2>/dev/null || true
+  log INFO "Roadmap cochée (bash) : $feature_name"
+}
+
+# Vérification fonctionnelle post-feature
+run_functional_check() {
+  local feature_name="$1"
+  if [ -z "${FUNCTIONAL_CHECK_COMMAND:-}" ]; then
+    return 0
+  fi
+  log INFO "Vérification fonctionnelle en cours..."
+  local func_output func_exit
+  func_output=$(run_in_project "$FUNCTIONAL_CHECK_COMMAND 2>&1") && func_exit=0 || func_exit=$?
+
+  if [ $func_exit -eq 0 ]; then
+    log INFO "Vérification fonctionnelle OK ✓"
+    LAST_FUNCTIONAL_CHECK=true
+    return 0
+  fi
+
+  log WARN "Vérification fonctionnelle échouée — tentative de correction..."
+  LAST_FUNCTIONAL_CHECK=false
+
+  # Une tentative de fix dédiée
+  run_claude "La vérification fonctionnelle a ÉCHOUÉ après le merge de la feature '$feature_name'.
+
+COMMANDE : $FUNCTIONAL_CHECK_COMMAND
+EXIT CODE : $func_exit
+OUTPUT :
+${func_output: -3000}
+
+RÈGLE ABSOLUE : l'application DOIT être fonctionnelle après chaque feature.
+Corrige le problème pour que l'app démarre/fonctionne correctement.
+Ne casse PAS les tests existants." \
+    20 "$LOG_DIR/feature-functional-check.log" "functional-fix" "$feature_name" || {
+    log WARN "Correction fonctionnelle échouée."
+  }
+
+  # Re-vérifier
+  func_output=$(run_in_project "$FUNCTIONAL_CHECK_COMMAND 2>&1") && func_exit=0 || func_exit=$?
+  if [ $func_exit -eq 0 ]; then
+    log INFO "Vérification fonctionnelle OK après correction ✓"
+    LAST_FUNCTIONAL_CHECK=true
+    # Commiter le fix
+    run_in_project "git add -A && git commit -m 'fix: app fonctionnelle après $feature_name' 2>/dev/null || true"
+  else
+    log ERROR "App non fonctionnelle après '$feature_name' — signalé mais on continue."
+    notify "ALERTE : App non fonctionnelle après '$feature_name'"
   fi
 }
 
@@ -1663,6 +1807,8 @@ while [ $FEATURE_COUNT -lt $MAX_FEATURES ]; do
 
   FEATURE_COUNT=$((FEATURE_COUNT + 1))
   EPIC_FEATURE_COUNT=$((EPIC_FEATURE_COUNT + 1))
+  update_phase_tracking "implement" "$feature_name"
+  timeline_add "$feature_name" "in_progress" 0
   save_state
 
   log PHASE "FEATURE #$FEATURE_COUNT : $feature_name"
@@ -1728,6 +1874,8 @@ $(cat "$prev_feedback")"
   run_claude "$impl_prompt" "$MAX_TURNS_PER_INVOCATION" "$LOG_DIR/feature-$FEATURE_COUNT-impl.log" "implement" "$feature_name"
 
   # --- Test & Fix Loop (avec détection de boucle) ---
+  update_phase_tracking "test-fix" "$feature_name"
+  save_state
   attempt=0
   tests_passed=false
   LAST_ERROR_HASH=""
@@ -1817,6 +1965,7 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
   if [ "$tests_passed" = false ]; then
     log ERROR "Feature '$feature_name' abandonnée après $attempt tentatives."
     TOTAL_FAILURES=$((TOTAL_FAILURES + 1))
+    timeline_update_last "failed" "$attempt"
     notify "Feature '$feature_name' abandonnée après $attempt tentatives de fix."
     gh_comment "❌ **Feature #$FEATURE_COUNT** : $feature_name — abandonnée après $attempt tentatives"
     gh_create_abandoned_issue "$feature_name" "$attempt"
@@ -1825,6 +1974,7 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
   fi
 
   # --- Reflect & Evolve ---
+  update_phase_tracking "reflect" "$feature_name"
   log INFO "Rétrospective..."
   reflect_prompt=$(render_phase "05-reflect.md" \
     "FEATURE_NAME=$feature_name" \
@@ -1911,11 +2061,19 @@ Exemples de problèmes : performance dégradée, bundle trop gros, couverture in
     fi
 
     log INFO "Feature '$feature_name' mergée."
+    # Cochage fiable de la roadmap (bash-based, en plus de la reflect phase)
+    mark_feature_done_bash "$feature_name"
+    # Vérification fonctionnelle post-merge
+    run_functional_check "$feature_name"
+    # Mise à jour timeline
+    timeline_update_last "done" "$attempt"
     notify "Feature #$FEATURE_COUNT '$feature_name' mergée (\$$TOTAL_COST_USD)"
     gh_comment "✅ **Feature #$FEATURE_COUNT** : $feature_name — mergée (fix: $attempt, coût: \$${TOTAL_COST_USD})"
     gh_sync_roadmap  # Fermer l'issue correspondante
   fi
 
+  CURRENT_PHASE=""
+  CURRENT_FEATURE=""
   save_state
 
   # --- Reset compteur epic ---
@@ -2105,6 +2263,25 @@ gh_sync_roadmap
 gh_create_release "v1.0.0" "Projet terminé — $FEATURE_COUNT features"
 gh_close_tracking_issue
 
+# Vérification fonctionnelle finale
+if [ -n "${FUNCTIONAL_CHECK_COMMAND:-}" ]; then
+  log INFO "Vérification fonctionnelle finale..."
+  final_func_output=$(run_in_project "$FUNCTIONAL_CHECK_COMMAND 2>&1") && final_func_exit=0 || final_func_exit=$?
+  if [ $final_func_exit -eq 0 ]; then
+    log INFO "App fonctionnelle en fin de run ✓"
+    LAST_FUNCTIONAL_CHECK=true
+  else
+    log ERROR "App NON fonctionnelle en fin de run ✗"
+    LAST_FUNCTIONAL_CHECK=false
+    notify "ALERTE : App non fonctionnelle en fin de run !"
+  fi
+  save_state
+fi
+
+CURRENT_PHASE="done"
+CURRENT_FEATURE=""
+save_state
+
 log PHASE "TERMINÉ"
 log INFO "Features complétées : $FEATURE_COUNT"
 log INFO "Features en échec : $TOTAL_FAILURES"
@@ -2117,13 +2294,31 @@ fi
 
 print_cost_summary
 
+# Calcul de la durée du run
+run_end_time=$(date +%s)
+run_start_epoch=$(date -d "$RUN_STARTED_AT" +%s 2>/dev/null || echo "$run_end_time")
+run_duration_s=$((run_end_time - run_start_epoch))
+run_hours=$((run_duration_s / 3600))
+run_minutes=$(( (run_duration_s % 3600) / 60 ))
+if [ $run_hours -gt 0 ]; then
+  run_duration_str="${run_hours}h${run_minutes}m"
+else
+  run_duration_str="${run_minutes}m"
+fi
+
 echo ""
 printf "${GREEN}═══════════════════════════════════════════════════${NC}\n"
 printf "${GREEN}  Agent terminé.${NC}\n"
-printf "${GREEN}  Features : %s | Échecs : %s${NC}\n" "$FEATURE_COUNT" "$TOTAL_FAILURES"
+printf "${GREEN}  Features : %s | Échecs : %s | Durée : %s${NC}\n" "$FEATURE_COUNT" "$TOTAL_FAILURES" "$run_duration_str"
 printf "${GREEN}  Coût total : \$%s USD${NC}\n" "$TOTAL_COST_USD"
+if [ -n "${FUNCTIONAL_CHECK_COMMAND:-}" ]; then
+  if [ "${LAST_FUNCTIONAL_CHECK:-}" = "true" ]; then
+    printf "${GREEN}  App fonctionnelle : ✓${NC}\n"
+  else
+    printf "${RED}  App fonctionnelle : ✗${NC}\n"
+  fi
+fi
 printf "${GREEN}  Logs : %s/${NC}\n" "$LOG_DIR"
-printf "${GREEN}  Tokens : %s${NC}\n" "$TOKENS_FILE"
 printf "${GREEN}  Projet : %s/${NC}\n" "$PROJECT_DIR"
 if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
   printf "${GREEN}  Améliorations : %s/orchestrator-improvements.md${NC}\n" "$PROJECT_DIR"
