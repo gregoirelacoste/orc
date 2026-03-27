@@ -6,9 +6,11 @@ set -euo pipefail
 # ============================================================
 #
 # Usage :
-#   ./init.sh                          — init interactif
-#   ./init.sh mon-projet               — init avec nom de projet
-#   ./init.sh mon-projet --skip-brief  — init sans brief interactif
+#   ./init.sh                                    — init interactif
+#   ./init.sh mon-projet                         — init avec nom de projet
+#   ./init.sh mon-projet --skip-brief            — init sans brief interactif
+#   ./init.sh mon-projet --brief briefs/x.md     — init avec brief existant (clarification IA)
+#   ./init.sh mon-projet --brief x.md --no-clarify — brief existant sans clarification
 #
 # Crée un dossier SÉPARÉ (par défaut ../mon-projet/) contenant
 # tout le nécessaire. Le repo orc reste un template propre.
@@ -28,12 +30,20 @@ NC='\033[0m'
 # === PARSE ARGS ===
 PROJECT_ARG=""
 SKIP_BRIEF=false
+BRIEF_FILE=""
+NO_CLARIFY=false
 
-for arg in "$@"; do
-  case "$arg" in
-    --skip-brief) SKIP_BRIEF=true ;;
-    -*) echo -e "${RED}Option inconnue : $arg${NC}"; exit 1 ;;
-    *) PROJECT_ARG="$arg" ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --skip-brief) SKIP_BRIEF=true; shift ;;
+    --brief)
+      BRIEF_FILE="${2:-}"
+      [ -z "$BRIEF_FILE" ] && { echo -e "${RED}--brief nécessite un chemin de fichier${NC}"; exit 1; }
+      shift 2
+      ;;
+    --no-clarify) NO_CLARIFY=true; shift ;;
+    -*) echo -e "${RED}Option inconnue : $1${NC}"; exit 1 ;;
+    *) PROJECT_ARG="$1"; shift ;;
   esac
 done
 
@@ -244,7 +254,55 @@ echo ""
 echo -e "${BOLD}Étape 5/5 — Rédaction du BRIEF.md${NC}"
 echo ""
 
-if [ "$SKIP_BRIEF" = true ]; then
+if [ -n "$BRIEF_FILE" ]; then
+  # Mode --brief : brief fourni, on le copie puis on clarifie
+  local_brief=""
+  if [ -f "$BRIEF_FILE" ]; then
+    local_brief="$BRIEF_FILE"
+  elif [ -f "$TEMPLATE_DIR/$BRIEF_FILE" ]; then
+    local_brief="$TEMPLATE_DIR/$BRIEF_FILE"
+  else
+    echo -e "${RED}  Brief non trouvé : $BRIEF_FILE${NC}"
+    exit 1
+  fi
+
+  cp "$local_brief" "$WORKSPACE_DIR/BRIEF.md"
+  echo -e "  ${GREEN}✓${NC} Brief copié depuis $BRIEF_FILE"
+
+  if [ "$NO_CLARIFY" = false ]; then
+    echo ""
+    echo "  Claude va lire ton brief, poser des questions pour éclaircir"
+    echo "  les zones floues, puis l'enrichir."
+    echo ""
+    echo -e "  ${YELLOW}Appuie sur Entrée pour démarrer...${NC}"
+    read -r
+
+    clarify_skill=$(cat "$WORKSPACE_DIR/skills-templates/clarify-brief.md")
+
+    claude "$(cat <<EOF
+$clarify_skill
+
+---
+
+Le projet s'appelle "$PROJECT_NAME".
+Le brief existant est dans BRIEF.md — lis-le et commence ton analyse.
+Pose des questions pour clarifier les zones floues, puis enrichis le brief.
+
+IMPORTANT : Écris le résultat final dans BRIEF.md (dans le dossier courant).
+EOF
+    )" --max-turns 40 -d "$WORKSPACE_DIR"
+
+    echo ""
+    if [ -f "$WORKSPACE_DIR/BRIEF.md" ]; then
+      echo -e "  ${GREEN}✓${NC} Brief clarifié et enrichi"
+    else
+      echo -e "  ${YELLOW}⚠${NC} Brief non mis à jour. Le brief original est conservé."
+    fi
+  else
+    echo -e "  ${YELLOW}Mode --no-clarify :${NC} brief copié tel quel."
+  fi
+
+elif [ "$SKIP_BRIEF" = true ]; then
   cp "$WORKSPACE_DIR/BRIEF.template.md" "$WORKSPACE_DIR/BRIEF.md"
   sed -i "s/\[Nom du projet\]/$PROJECT_NAME/" "$WORKSPACE_DIR/BRIEF.md"
   echo -e "  ${YELLOW}Mode --skip-brief :${NC} template copié."

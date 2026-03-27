@@ -51,18 +51,23 @@ is_running() {
 
 cmd_new() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : orc agent new <nom> [--brief briefs/x.md]"
+  [ -z "$name" ] && die "Usage : orc agent new <nom> [--brief briefs/x.md] [--no-clarify]"
 
   local dir
   dir=$(project_dir "$name")
   shift
   local brief_file=""
+  local no_clarify=false
   while [ $# -gt 0 ]; do
     case "$1" in
       --brief)
         brief_file="${2:-}"
         [ -z "$brief_file" ] && die "--brief nécessite un chemin de fichier"
         shift 2
+        ;;
+      --no-clarify)
+        no_clarify=true
+        shift
         ;;
       *) die "Option inconnue : $1" ;;
     esac
@@ -120,8 +125,30 @@ cmd_new() {
     fi
 
     cp "$resolved_brief" "$dir/BRIEF.md"
-    cp "$resolved_brief" "$dir/project/BRIEF.md"
     printf "  ${GREEN}✓${NC} Brief copié depuis %s\n" "$brief_file"
+
+    if [ "$no_clarify" = false ]; then
+      printf "\n  ${CYAN}Claude va analyser le brief et poser des questions pour le clarifier...${NC}\n\n"
+
+      local clarify_skill
+      clarify_skill=$(cat "$dir/skills-templates/clarify-brief.md")
+
+      ( cd "$dir" && claude --max-turns 40 -- "$clarify_skill
+
+---
+
+Le projet s'appelle \"$name\".
+Le brief existant est dans BRIEF.md — lis-le et commence ton analyse.
+Pose des questions pour clarifier les zones floues, puis enrichis le brief." )
+
+      if [ -f "$dir/BRIEF.md" ]; then
+        printf "\n  ${GREEN}✓${NC} Brief clarifié et enrichi\n"
+      else
+        printf "\n  ${YELLOW}⚠${NC} Brief non mis à jour. Le brief original est conservé.\n"
+      fi
+    fi
+
+    cp "$dir/BRIEF.md" "$dir/project/BRIEF.md"
   else
     printf "\n  ${CYAN}Claude va te poser des questions pour rédiger le brief...${NC}\n\n"
 
