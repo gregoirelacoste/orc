@@ -30,6 +30,7 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 ├── phases/                  ← Prompts Markdown avec placeholders {{VAR}} pour chaque phase (00-07)
 ├── skills-templates/        ← Skills copiées dans project/.claude/skills/ au bootstrap
 ├── codebase/                ← Documentation structurée du système orc lui-même (INDEX.md, functions.md, etc.)
+├── docs/                    ← Documentation utilisateur : guides, tutos, FAQ (→ docs/INDEX.md)
 ├── learnings/               ← Insights inter-projets, copiés au bootstrap, lus par phase 00
 ├── briefs/                  ← Exemples de briefs produit
 ├── roadmap/                 ← Items de roadmap structurés (backlog → planned → in-progress → done)
@@ -53,14 +54,27 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 │   ├── tracking-issue       ← Numéro issue GitHub de tracking (ignoré)
 │   └── logs/                ← Logs orchestrateur (ignoré)
 └── project/                 ← Code produit (son propre git)
+    ├── CLAUDE.md            ← Auto-généré (convention Claude Code, reste à la racine)
+    ├── .claude/skills/      ← Skills agent (convention Claude Code, reste à la racine)
+    ├── .orc/                ← Artéfacts orchestrateur (isolés du produit)
+    │   ├── BRIEF.md         ← Copie du brief
+    │   ├── ROADMAP.md       ← Roadmap features
+    │   ├── codebase/        ← Doc technique pour l'IA (INDEX.md, auto-map.md, modules.md, etc.)
+    │   ├── research/        ← Veille marché (competitors/, trends/, INDEX.md)
+    │   └── logs/            ← Rétrospectives, réflexions, feedback humain
+    ├── README.md            ← Doc produit
+    ├── src/                 ← Code applicatif
+    └── ...
 ```
 
 ## Commandes
 
 ### CLI unifiée (`orc`)
-- `orc agent new|start|stop|status|logs <nom>` — gestion des projets
+- `orc agent new <nom> [--brief x.md] [--no-clarify]` — créer un projet (wizard, brief+clarification, ou brief direct)
+- `orc agent start|stop|status|logs <nom>` — gestion des projets
 - `orc roadmap [--detail|--full] [--priority P1] [--tag x]` — suivi roadmap
 - `orc admin config|model|budget|key|version` — administration
+- `orc docs [sujet]` — documentation utilisateur
 - `orc s` / `orc r` / `orc l <nom>` — raccourcis (status, roadmap, logs)
 
 ### Développement
@@ -89,6 +103,7 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 - **Placeholders** : `{{VAR}}` dans les phases, substitués par `render_phase()`
 - **Pas de données projet ici** : le template ne contient jamais de BRIEF.md ou config.sh spécifique
 - **Tester la syntaxe** : `bash -n orchestrator.sh` avant chaque commit
+- **Documenter les changements** : après chaque modification, utiliser le skill `maintain-docs` pour mettre à jour la doc impactée (docs/, README, help CLI). Lire `docs/INDEX.md` d'abord pour savoir quoi toucher.
 
 ## Patterns importants
 
@@ -99,12 +114,12 @@ Point central — lance Claude en background, monitore le heartbeat, détecte le
 Substitue `{{VAR}}` dans les prompts. Attention : la substitution bash `${content//pattern/replacement}` casse si `replacement` contient `/` ou `\`. Pour les outputs build/test, utiliser `write_fix_prompt()` à la place.
 
 ### Reprise après crash
-Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe ? → skip research. Features non-cochées dans ROADMAP ? → skip strategy. `state.json` → restaure les compteurs.
+Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/INDEX.md` existe ? → skip research. Features non-cochées dans `.orc/ROADMAP.md` ? → skip strategy. `state.json` → restaure les compteurs.
 
 ### Contrôle humain mid-run
 - `.orc/human-notes.md` : lu et injecté dans le prompt avant chaque feature
 - `.orc/pause-requested` / `.orc/stop-after-feature` : signaux file-based pour le mode nohup
-- `logs/human-feedback-N.md` : feedback structuré, prioritaire sur les observations de l'IA
+- `.orc/logs/human-feedback-N.md` : feedback structuré, prioritaire sur les observations de l'IA
 
 ### GitHub Integration (local-first, GitHub-augmented)
 **Principe** : local = source de vérité, GitHub = miroir de visibilité. Tout fonctionne sans GitHub. Chaque option est indépendante et off par défaut.
@@ -124,22 +139,27 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `INDEX.md` existe
 ### Quality gate
 `QUALITY_COMMAND` exécuté après tests, avant merge. Non-bloquant si échec après correction.
 
-### Connaissance projet (codebase/ + stack-conventions.md)
-- `codebase/INDEX.md` : carte sémantique du projet (max 40 lignes). Lu AVANT chaque implémentation.
-- `codebase/auto-map.md` : carte auto-générée (grep des exports/classes). Regénérée avant chaque feature.
+### Connaissance projet (.orc/codebase/ + stack-conventions.md)
+- `.orc/codebase/INDEX.md` : carte sémantique du projet (max 40 lignes). Lu AVANT chaque implémentation.
+- `.orc/codebase/auto-map.md` : carte auto-générée (grep des exports/classes). Regénérée avant chaque feature.
 - Fichiers de détail par domaine : `modules.md`, `utilities.md`, `integrations.md`, `data-models.md`, `architecture.md`, `security.md`.
 - `.claude/skills/stack-conventions.md` : conventions spécifiques à la stack, auto-enrichi au fil du projet.
 
+### Séparation orc / produit dans project/
+Les artéfacts orc sont isolés dans `project/.orc/` : BRIEF.md, ROADMAP.md, codebase/, research/, logs/.
+Seuls `CLAUDE.md` et `.claude/skills/` restent à la racine (conventions Claude Code).
+Le produit (README.md, src/, docs/, package.json) n'est pas pollué par l'outillage orc.
+
 ### Contexte adaptatif par phase
 `run_claude()` injecte un contexte différent selon la phase :
-- implement → INDEX.md + auto-map.md + fichiers de détail pertinents + stack-conventions.md
-- fix → auto-map.md + security.md + réflexions passées
-- strategy → INDEX.md + architecture.md + research/INDEX.md
-- reflect → auto-map.md (vérité) + INDEX.md + fichiers de détail à mettre à jour
-- meta-retro → INDEX.md + auto-map.md + audit de cohérence de tous les fichiers
+- implement → .orc/codebase/INDEX.md + auto-map.md + fichiers de détail pertinents + stack-conventions.md
+- fix → .orc/codebase/auto-map.md + security.md + réflexions passées
+- strategy → .orc/codebase/INDEX.md + architecture.md + .orc/research/INDEX.md
+- reflect → .orc/codebase/auto-map.md (vérité) + INDEX.md + fichiers de détail à mettre à jour
+- meta-retro → .orc/codebase/INDEX.md + auto-map.md + audit de cohérence de tous les fichiers
 
 ### Réflexions structurées (pattern Reflexion)
-Après chaque échec de fix, l'IA écrit une réflexion structurée dans `logs/fix-reflections-N.md`. Ces réflexions sont injectées dans les tentatives suivantes.
+Après chaque échec de fix, l'IA écrit une réflexion structurée dans `.orc/logs/fix-reflections-N.md`. Ces réflexions sont injectées dans les tentatives suivantes.
 
 ## Roadmap
 

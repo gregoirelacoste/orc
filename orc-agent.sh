@@ -51,18 +51,23 @@ is_running() {
 
 cmd_new() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : orc agent new <nom> [--brief briefs/x.md]"
+  [ -z "$name" ] && die "Usage : orc agent new <nom> [--brief briefs/x.md] [--no-clarify]"
 
   local dir
   dir=$(project_dir "$name")
   shift
   local brief_file=""
+  local no_clarify=false
   while [ $# -gt 0 ]; do
     case "$1" in
       --brief)
         brief_file="${2:-}"
         [ -z "$brief_file" ] && die "--brief nécessite un chemin de fichier"
         shift 2
+        ;;
+      --no-clarify)
+        no_clarify=true
+        shift
         ;;
       *) die "Option inconnue : $1" ;;
     esac
@@ -94,11 +99,11 @@ cmd_new() {
   mkdir -p "$dir/project"
   [ -d "$dir/project/.git" ] || ( cd "$dir/project" && git init -b main > /dev/null 2>&1 )
 
-  mkdir -p "$dir/project/research/competitors" \
-           "$dir/project/research/trends" \
-           "$dir/project/research/user-needs" \
-           "$dir/project/research/regulations" \
-           "$dir/project/logs"
+  mkdir -p "$dir/project/.orc/research/competitors" \
+           "$dir/project/.orc/research/trends" \
+           "$dir/project/.orc/research/user-needs" \
+           "$dir/project/.orc/research/regulations" \
+           "$dir/project/.orc/logs"
 
   mkdir -p "$dir/project/.claude/skills"
   cp "$dir/skills-templates/"*.md "$dir/project/.claude/skills/"
@@ -120,8 +125,30 @@ cmd_new() {
     fi
 
     cp "$resolved_brief" "$dir/BRIEF.md"
-    cp "$resolved_brief" "$dir/project/BRIEF.md"
     printf "  ${GREEN}✓${NC} Brief copié depuis %s\n" "$brief_file"
+
+    if [ "$no_clarify" = false ]; then
+      printf "\n  ${CYAN}Claude va analyser le brief et poser des questions pour le clarifier...${NC}\n\n"
+
+      local clarify_skill
+      clarify_skill=$(cat "$dir/skills-templates/clarify-brief.md")
+
+      ( cd "$dir" && claude --max-turns 40 -- "$clarify_skill
+
+---
+
+Le projet s'appelle \"$name\".
+Le brief existant est dans BRIEF.md — lis-le et commence ton analyse.
+Pose des questions pour clarifier les zones floues, puis enrichis le brief." )
+
+      if [ -f "$dir/BRIEF.md" ]; then
+        printf "\n  ${GREEN}✓${NC} Brief clarifié et enrichi\n"
+      else
+        printf "\n  ${YELLOW}⚠${NC} Brief non mis à jour. Le brief original est conservé.\n"
+      fi
+    fi
+
+    cp "$dir/BRIEF.md" "$dir/project/.orc/BRIEF.md"
   else
     printf "\n  ${CYAN}Claude va te poser des questions pour rédiger le brief...${NC}\n\n"
 
@@ -136,7 +163,7 @@ L'utilisateur crée un projet appelé \"$name\".
 Pose les questions une par une. Écris le résultat dans BRIEF.md." )
 
     if [ -f "$dir/BRIEF.md" ]; then
-      cp "$dir/BRIEF.md" "$dir/project/BRIEF.md"
+      cp "$dir/BRIEF.md" "$dir/project/.orc/BRIEF.md"
       printf "\n  ${GREEN}✓${NC} Brief rédigé\n"
     else
       printf "\n  ${YELLOW}⚠${NC} Brief non créé. Rédige-le manuellement :\n"
@@ -306,9 +333,9 @@ cmd_status() {
     fi
 
     local remaining="—"
-    if [ -f "$proj_dir/project/ROADMAP.md" ]; then
+    if [ -f "$proj_dir/project/.orc/ROADMAP.md" ]; then
       local todo
-      todo=$(grep -c '^\- \[ \]' "$proj_dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+      todo=$(grep -c '^\- \[ \]' "$proj_dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
       if [ "$todo" -eq 0 ] && [ "$status" = "done" ]; then
         remaining="terminé"
       else
@@ -370,10 +397,10 @@ cmd_status_detail() {
     printf "  Modèle : %s\n" "$(cat "$model_file")"
   fi
 
-  if [ -f "$dir/project/ROADMAP.md" ]; then
+  if [ -f "$dir/project/.orc/ROADMAP.md" ]; then
     local done_count todo
-    done_count=$(grep -c '^\- \[x\]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
-    todo=$(grep -c '^\- \[ \]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+    done_count=$(grep -c '^\- \[x\]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
+    todo=$(grep -c '^\- \[ \]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
     printf "  Roadmap : %s faites, %s restantes\n" "$done_count" "$todo"
   fi
 
@@ -732,7 +759,7 @@ cmd_project_roadmap() {
 
   local dir
   dir=$(project_dir "$name")
-  local roadmap_file="$dir/project/ROADMAP.md"
+  local roadmap_file="$dir/project/.orc/ROADMAP.md"
 
   if [ ! -f "$roadmap_file" ]; then
     die "Pas de ROADMAP.md pour '$name' (le projet n'a peut-être pas encore démarré)"

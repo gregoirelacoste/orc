@@ -6,9 +6,11 @@ set -euo pipefail
 # ============================================================
 #
 # Usage :
-#   ./init.sh                          — init interactif
-#   ./init.sh mon-projet               — init avec nom de projet
-#   ./init.sh mon-projet --skip-brief  — init sans brief interactif
+#   ./init.sh                                    — init interactif
+#   ./init.sh mon-projet                         — init avec nom de projet
+#   ./init.sh mon-projet --skip-brief            — init sans brief interactif
+#   ./init.sh mon-projet --brief briefs/x.md     — init avec brief existant (clarification IA)
+#   ./init.sh mon-projet --brief x.md --no-clarify — brief existant sans clarification
 #
 # Crée un dossier SÉPARÉ (par défaut ../mon-projet/) contenant
 # tout le nécessaire. Le repo orc reste un template propre.
@@ -28,12 +30,20 @@ NC='\033[0m'
 # === PARSE ARGS ===
 PROJECT_ARG=""
 SKIP_BRIEF=false
+BRIEF_FILE=""
+NO_CLARIFY=false
 
-for arg in "$@"; do
-  case "$arg" in
-    --skip-brief) SKIP_BRIEF=true ;;
-    -*) echo -e "${RED}Option inconnue : $arg${NC}"; exit 1 ;;
-    *) PROJECT_ARG="$arg" ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --skip-brief) SKIP_BRIEF=true; shift ;;
+    --brief)
+      BRIEF_FILE="${2:-}"
+      [ -z "$BRIEF_FILE" ] && { echo -e "${RED}--brief nécessite un chemin de fichier${NC}"; exit 1; }
+      shift 2
+      ;;
+    --no-clarify) NO_CLARIFY=true; shift ;;
+    -*) echo -e "${RED}Option inconnue : $1${NC}"; exit 1 ;;
+    *) PROJECT_ARG="$1"; shift ;;
   esac
 done
 
@@ -203,14 +213,15 @@ cd "$WORKSPACE_DIR/project" && git init -b main > /dev/null 2>&1 && cd - > /dev/
 
 echo -e "  ${GREEN}✓${NC} project/ initialisé (git indépendant)"
 
-# Créer la structure research/ dans project/
-mkdir -p "$WORKSPACE_DIR/project/research/competitors" \
-         "$WORKSPACE_DIR/project/research/trends" \
-         "$WORKSPACE_DIR/project/research/user-needs" \
-         "$WORKSPACE_DIR/project/research/regulations" \
-         "$WORKSPACE_DIR/project/logs"
+# Créer la structure .orc/ dans project/
+mkdir -p "$WORKSPACE_DIR/project/.orc" \
+         "$WORKSPACE_DIR/project/.orc/research/competitors" \
+         "$WORKSPACE_DIR/project/.orc/research/trends" \
+         "$WORKSPACE_DIR/project/.orc/research/user-needs" \
+         "$WORKSPACE_DIR/project/.orc/research/regulations" \
+         "$WORKSPACE_DIR/project/.orc/logs"
 
-echo -e "  ${GREEN}✓${NC} Structure research/ créée"
+echo -e "  ${GREEN}✓${NC} Structure .orc/ créée dans project/"
 
 # Copier les skills templates dans project/
 mkdir -p "$WORKSPACE_DIR/project/.claude/skills"
@@ -244,7 +255,55 @@ echo ""
 echo -e "${BOLD}Étape 5/5 — Rédaction du BRIEF.md${NC}"
 echo ""
 
-if [ "$SKIP_BRIEF" = true ]; then
+if [ -n "$BRIEF_FILE" ]; then
+  # Mode --brief : brief fourni, on le copie puis on clarifie
+  local_brief=""
+  if [ -f "$BRIEF_FILE" ]; then
+    local_brief="$BRIEF_FILE"
+  elif [ -f "$TEMPLATE_DIR/$BRIEF_FILE" ]; then
+    local_brief="$TEMPLATE_DIR/$BRIEF_FILE"
+  else
+    echo -e "${RED}  Brief non trouvé : $BRIEF_FILE${NC}"
+    exit 1
+  fi
+
+  cp "$local_brief" "$WORKSPACE_DIR/BRIEF.md"
+  echo -e "  ${GREEN}✓${NC} Brief copié depuis $BRIEF_FILE"
+
+  if [ "$NO_CLARIFY" = false ]; then
+    echo ""
+    echo "  Claude va lire ton brief, poser des questions pour éclaircir"
+    echo "  les zones floues, puis l'enrichir."
+    echo ""
+    echo -e "  ${YELLOW}Appuie sur Entrée pour démarrer...${NC}"
+    read -r
+
+    clarify_skill=$(cat "$WORKSPACE_DIR/skills-templates/clarify-brief.md")
+
+    claude "$(cat <<EOF
+$clarify_skill
+
+---
+
+Le projet s'appelle "$PROJECT_NAME".
+Le brief existant est dans BRIEF.md — lis-le et commence ton analyse.
+Pose des questions pour clarifier les zones floues, puis enrichis le brief.
+
+IMPORTANT : Écris le résultat final dans BRIEF.md (dans le dossier courant).
+EOF
+    )" --max-turns 40 -d "$WORKSPACE_DIR"
+
+    echo ""
+    if [ -f "$WORKSPACE_DIR/BRIEF.md" ]; then
+      echo -e "  ${GREEN}✓${NC} Brief clarifié et enrichi"
+    else
+      echo -e "  ${YELLOW}⚠${NC} Brief non mis à jour. Le brief original est conservé."
+    fi
+  else
+    echo -e "  ${YELLOW}Mode --no-clarify :${NC} brief copié tel quel."
+  fi
+
+elif [ "$SKIP_BRIEF" = true ]; then
   cp "$WORKSPACE_DIR/BRIEF.template.md" "$WORKSPACE_DIR/BRIEF.md"
   sed -i "s/\[Nom du projet\]/$PROJECT_NAME/" "$WORKSPACE_DIR/BRIEF.md"
   echo -e "  ${YELLOW}Mode --skip-brief :${NC} template copié."
@@ -281,6 +340,12 @@ EOF
     echo -e "  ${YELLOW}⚠${NC} BRIEF.md non créé. Tu peux le rédiger manuellement :"
     echo -e "    ${CYAN}cp $WORKSPACE_DIR/BRIEF.template.md $WORKSPACE_DIR/BRIEF.md${NC}"
   fi
+fi
+
+# Copier le brief dans project/.orc/ (cohérent avec orc-agent.sh)
+if [ -f "$WORKSPACE_DIR/BRIEF.md" ]; then
+  mkdir -p "$WORKSPACE_DIR/project/.orc"
+  cp "$WORKSPACE_DIR/BRIEF.md" "$WORKSPACE_DIR/project/.orc/BRIEF.md"
 fi
 
 echo ""
