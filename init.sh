@@ -213,14 +213,15 @@ cd "$WORKSPACE_DIR/project" && git init -b main > /dev/null 2>&1 && cd - > /dev/
 
 echo -e "  ${GREEN}✓${NC} project/ initialisé (git indépendant)"
 
-# Créer la structure research/ dans project/
-mkdir -p "$WORKSPACE_DIR/project/research/competitors" \
-         "$WORKSPACE_DIR/project/research/trends" \
-         "$WORKSPACE_DIR/project/research/user-needs" \
-         "$WORKSPACE_DIR/project/research/regulations" \
-         "$WORKSPACE_DIR/project/logs"
+# Créer la structure .orc/ dans project/
+mkdir -p "$WORKSPACE_DIR/project/.orc" \
+         "$WORKSPACE_DIR/project/.orc/research/competitors" \
+         "$WORKSPACE_DIR/project/.orc/research/trends" \
+         "$WORKSPACE_DIR/project/.orc/research/user-needs" \
+         "$WORKSPACE_DIR/project/.orc/research/regulations" \
+         "$WORKSPACE_DIR/project/.orc/logs"
 
-echo -e "  ${GREEN}✓${NC} Structure research/ créée"
+echo -e "  ${GREEN}✓${NC} Structure .orc/ créée dans project/"
 
 # Copier les skills templates dans project/
 mkdir -p "$WORKSPACE_DIR/project/.claude/skills"

@@ -99,11 +99,11 @@ cmd_new() {
   mkdir -p "$dir/project"
   [ -d "$dir/project/.git" ] || ( cd "$dir/project" && git init -b main > /dev/null 2>&1 )
 
-  mkdir -p "$dir/project/research/competitors" \
-           "$dir/project/research/trends" \
-           "$dir/project/research/user-needs" \
-           "$dir/project/research/regulations" \
-           "$dir/project/logs"
+  mkdir -p "$dir/project/.orc/research/competitors" \
+           "$dir/project/.orc/research/trends" \
+           "$dir/project/.orc/research/user-needs" \
+           "$dir/project/.orc/research/regulations" \
+           "$dir/project/.orc/logs"
 
   mkdir -p "$dir/project/.claude/skills"
   cp "$dir/skills-templates/"*.md "$dir/project/.claude/skills/"
@@ -148,7 +148,7 @@ Pose des questions pour clarifier les zones floues, puis enrichis le brief." )
       fi
     fi
 
-    cp "$dir/BRIEF.md" "$dir/project/BRIEF.md"
+    cp "$dir/BRIEF.md" "$dir/project/.orc/BRIEF.md"
   else
     printf "\n  ${CYAN}Claude va te poser des questions pour rédiger le brief...${NC}\n\n"
 
@@ -163,7 +163,7 @@ L'utilisateur crée un projet appelé \"$name\".
 Pose les questions une par une. Écris le résultat dans BRIEF.md." )
 
     if [ -f "$dir/BRIEF.md" ]; then
-      cp "$dir/BRIEF.md" "$dir/project/BRIEF.md"
+      cp "$dir/BRIEF.md" "$dir/project/.orc/BRIEF.md"
       printf "\n  ${GREEN}✓${NC} Brief rédigé\n"
     else
       printf "\n  ${YELLOW}⚠${NC} Brief non créé. Rédige-le manuellement :\n"
