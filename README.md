@@ -97,7 +97,7 @@ Voir `config.default.sh` pour la liste complète.
 ./orc.sh agent start mon-projet
 ```
 
-L'orchestrateur tourne en background. Le code est généré dans `~/projects/mon-projet/project/`.
+L'orchestrateur tourne en background. Le code est généré dans `~/projects/mon-projet/`.
 
 ### 4. Suivre l'avancement
 
@@ -142,6 +142,8 @@ Configurables dans `.orc/config.sh` :
 orc agent new <nom>                    # Créer un projet (wizard interactif)
 orc agent new <nom> --brief x.md      # Brief existant + clarification IA
 orc agent new <nom> --brief x.md --no-clarify  # Brief direct
+orc agent new <nom> --github           # Créer + repo GitHub
+orc agent github <nom>                 # Créer le repo GitHub après coup
 orc agent start <nom>                  # Lancer en background
 orc agent stop <nom>                   # Arrêter proprement
 orc agent restart <nom>                # Redémarrer
@@ -169,6 +171,7 @@ orc admin version                      # Version + vérification dépendances
 ```bash
 orc s              # → orc agent status
 orc s <nom>        # → orc agent status <nom>
+orc dash <nom>     # → orc dashboard <nom>
 orc l <nom>        # → orc agent logs <nom>
 orc r              # → orc roadmap
 ```
@@ -209,30 +212,23 @@ L'agent améliore ses propres outils au fil du projet :
 ## Structure d'un workspace
 
 ```
-~/projects/mon-projet/
+~/projects/mon-projet/       ← Repo git unique
 ├── BRIEF.md                 ← Brief produit (source de vérité, immuable)
-├── orchestrator.sh          ← Boucle principale
-├── phases/                  ← Prompts par phase (modifiables)
-├── skills-templates/        ← Skills copiées dans le projet
-├── .orc/                    ← État orchestrateur
+├── orchestrator.sh          → symlink vers orc/
+├── phases/                  → symlink vers orc/
+├── CLAUDE.md                ← Auto-généré et auto-amélioré
+├── .claude/skills/          ← Skills de l'agent
+├── .orc/                    ← État orchestrateur + artéfacts
 │   ├── config.sh            ← Configuration du projet
+│   ├── BRIEF.md             ← Copie du brief
+│   ├── ROADMAP.md           ← Roadmap features
+│   ├── codebase/            ← Carte sémantique du code
+│   ├── research/            ← Veille marché
 │   ├── state.json           ← Compteurs, reprise après crash
 │   ├── tokens.json          ← Tracking des coûts
-│   ├── human-notes.md       ← Notes injectées dans le prompt
-│   ├── .pid                 ← PID du process en cours
 │   └── logs/                ← Logs orchestrateur
-│
-└── project/                 ← Le code produit (son propre repo git)
-    ├── CLAUDE.md            ← Auto-généré et auto-amélioré
-    ├── .claude/skills/      ← Skills de l'agent
-    ├── .orc/                ← Artéfacts orchestrateur (isolés du produit)
-    │   ├── BRIEF.md         ← Copie du brief
-    │   ├── ROADMAP.md       ← Roadmap features
-    │   ├── codebase/        ← Carte sémantique du code
-    │   ├── research/        ← Veille marché
-    │   └── logs/            ← Rétrospectives, feedback
-    ├── README.md            ← Doc produit
-    └── src/                 ← Code applicatif
+├── src/                     ← Code applicatif
+└── README.md                ← Doc produit
 ```
 
 ## GitHub (optionnel)
@@ -252,7 +248,7 @@ Tout fonctionne en local sans GitHub. Chaque option est indépendante et off par
 ## FAQ
 
 **Le workspace est-il un repo git ?**
-Non. Seul `project/` à l'intérieur a son propre git.
+Oui. Le workspace est directement le repo git du projet.
 
 **Je peux lancer plusieurs projets en parallèle ?**
 Oui. Chaque projet est indépendant. `orc s` les affiche tous.

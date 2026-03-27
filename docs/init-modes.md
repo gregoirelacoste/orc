@@ -115,22 +115,19 @@ La différence avec `orc agent new` : `init.sh` inclut un wizard de configuratio
 Quel que soit le mode, le workspace créé est identique :
 
 ```
-~/projects/mon-projet/
+~/projects/mon-projet/       ← Repo git unique
 ├── BRIEF.md                 ← Brief produit (source de vérité)
-├── orchestrator.sh          ← Boucle principale
-├── phases/                  ← Prompts par phase
-├── skills-templates/        ← Skills copiées dans le projet
-├── .orc/
-│   ├── config.sh            ← Configuration du projet
-│   ├── logs/                ← Logs orchestrateur
+├── orchestrator.sh          → symlink vers orc/
+├── phases/                  → symlink vers orc/
+├── CLAUDE.md                ← Guidelines IA (auto-généré)
+├── .claude/skills/          ← Skills agent (enrichies au fil du run)
+├── .orc/                    ← État + artéfacts orchestrateur
+│   ├── config.sh, BRIEF.md, ROADMAP.md
+│   ├── codebase/, research/
+│   ├── state.json, tokens.json, logs/
 │   └── ...
-└── project/                 ← Code produit (git indépendant)
-    ├── CLAUDE.md            ← Guidelines IA (convention Claude Code)
-    ├── .claude/skills/      ← Skills agent (convention Claude Code)
-    ├── .orc/                ← Artéfacts orc (isolés du produit)
-    │   ├── BRIEF.md, ROADMAP.md, codebase/, research/, logs/
-    ├── README.md            ← Doc produit (clean)
-    └── src/                 ← Code applicatif
+├── src/                     ← Code applicatif
+└── README.md                ← Doc produit
 ```
 
 ## Écrire un bon brief

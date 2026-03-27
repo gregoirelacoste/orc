@@ -459,10 +459,10 @@ L'IA charge ~200 tokens de contexte pertinent au lieu de ~2000 tokens de tout.
 ## Structure complète des fichiers
 
 ```
-project/
+~/projects/mon-projet/          # Repo git unique (structure aplatie)
 ├── BRIEF.md                    # Vision produit (IMMUABLE — jamais modifié par Claude)
 ├── CLAUDE.md                   # Instructions (auto-évolutif)
-├── ROADMAP.md                  # Backlog en epics (auto-évolutif)
+├── .orc/ROADMAP.md             # Backlog en epics (auto-évolutif)
 ├── DONE.md                     # Créé quand le projet est terminé
 │
 ├── codebase/                    # Mémoire structurée du projet (index sémantique)
@@ -553,7 +553,7 @@ nohup ./orchestrator.sh > logs/orchestrator.log 2>&1 &
 
 # Surveiller
 tail -f logs/orchestrator.log
-watch -n 30 'grep -c "\[x\]" project/ROADMAP.md'
+watch -n 30 'grep -c "\[x\]" .orc/ROADMAP.md'
 ```
 
 ---

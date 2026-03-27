@@ -22,13 +22,13 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 ├── orc.sh                   ← CLI unifiée : point d'entrée unique (orc agent|roadmap|admin)
 ├── orc-agent.sh             ← Sous-commandes projets (new, start, stop, status, logs, roadmap)
 ├── orc-admin.sh             ← Sous-commandes admin (config, model, budget, key, version)
-├── orchestrator.sh          ← Boucle principale (2100+ lignes) : bootstrap → research → strategy → feature loop → evolve
+├── orchestrator.sh          ← Boucle principale (2300+ lignes) : bootstrap → research → strategy → feature loop → evolve
 ├── agent.sh                 ← CLI legacy (compatibilité, redirige vers orc)
 ├── init.sh                  ← Wizard interactif : crée un workspace SÉPARÉ (../mon-projet/)
 ├── deploy.sh                ← Script d'installation VPS (Ubuntu 22+ / Debian 12+, idempotent)
 ├── config.default.sh        ← Template de config (copié et personnalisé par init.sh)
 ├── phases/                  ← Prompts Markdown avec placeholders {{VAR}} pour chaque phase (00-07)
-├── skills-templates/        ← Skills copiées dans project/.claude/skills/ au bootstrap
+├── skills-templates/        ← Skills copiées dans .claude/skills/ au bootstrap
 ├── codebase/                ← Documentation structurée du système orc lui-même (INDEX.md, functions.md, etc.)
 ├── docs/                    ← Documentation utilisateur : guides, tutos, FAQ (→ docs/INDEX.md)
 ├── learnings/               ← Insights inter-projets, copiés au bootstrap, lus par phase 00
@@ -39,38 +39,34 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 └── ARCHITECTURE.md          ← Documentation complète du système
 ```
 
-**Le workspace créé par init.sh :**
+**Le workspace créé par `orc agent new` :**
 ```
-../mon-projet/               ← Auto-contenu, indépendant du template
-├── orchestrator.sh          ← Copie
+../mon-projet/               ← Repo git unique, structure aplatie
+├── orchestrator.sh          → symlink vers orc/orchestrator.sh
+├── phases/                  → symlink vers orc/phases/
 ├── BRIEF.md                 ← Brief produit
-├── phases/, skills-templates/
-├── .orc/                    ← État orchestrateur (partiellement gitté)
+├── CLAUDE.md                ← Auto-généré par l'orchestrateur
+├── .claude/skills/          ← Skills agent (enrichies au fil du run)
+├── .orc/                    ← État orchestrateur + artéfacts (partiellement gitté)
 │   ├── config.sh            ← Personnalisé (gitté)
+│   ├── BRIEF.md             ← Copie du brief (gitté)
+│   ├── ROADMAP.md           ← Roadmap features (gitté)
+│   ├── codebase/            ← Doc technique pour l'IA (gitté)
+│   ├── research/            ← Veille marché (gitté)
 │   ├── state.json           ← Runtime (ignoré)
 │   ├── tokens.json          ← Coûts (ignoré)
-│   ├── .lock                ← Lockfile (ignoré)
-│   ├── .pid                 ← PID du process (ignoré)
-│   ├── tracking-issue       ← Numéro issue GitHub de tracking (ignoré)
+│   ├── .lock, .pid          ← Runtime (ignoré)
 │   └── logs/                ← Logs orchestrateur (ignoré)
-└── project/                 ← Code produit (son propre git)
-    ├── CLAUDE.md            ← Auto-généré (convention Claude Code, reste à la racine)
-    ├── .claude/skills/      ← Skills agent (convention Claude Code, reste à la racine)
-    ├── .orc/                ← Artéfacts orchestrateur (isolés du produit)
-    │   ├── BRIEF.md         ← Copie du brief
-    │   ├── ROADMAP.md       ← Roadmap features
-    │   ├── codebase/        ← Doc technique pour l'IA (INDEX.md, auto-map.md, modules.md, etc.)
-    │   ├── research/        ← Veille marché (competitors/, trends/, INDEX.md)
-    │   └── logs/            ← Rétrospectives, réflexions, feedback humain
-    ├── README.md            ← Doc produit
-    ├── src/                 ← Code applicatif
-    └── ...
+├── src/                     ← Code applicatif
+├── README.md                ← Doc produit
+└── ...
 ```
 
 ## Commandes
 
 ### CLI unifiée (`orc`)
-- `orc agent new <nom> [--brief x.md] [--no-clarify]` — créer un projet (wizard, brief+clarification, ou brief direct)
+- `orc agent new <nom> [--brief x.md] [--no-clarify] [--github [public]]` — créer un projet (wizard, brief+clarification, ou brief direct, optionnel: repo GitHub)
+- `orc agent github <nom> [--public]` — créer le repo GitHub d'un projet existant
 - `orc agent start|stop|status|logs <nom>` — gestion des projets
 - `orc agent dashboard <nom>` — dashboard live avec progression, roadmap, activité (auto-refresh 5s)
 - `orc roadmap [--detail|--full] [--priority P1] [--tag x]` — suivi roadmap
@@ -87,7 +83,7 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 ## Conventions
 
 - **Bash strict mode** : `set -euo pipefail` en haut de chaque script
-- **Pas de `cd` nu** : utiliser `run_in_project()` (subshell) pour exécuter dans project/
+- **Pas de `cd` nu** : utiliser `run_in_project()` (subshell) pour exécuter dans `$PROJECT_DIR`
 - **printf > echo -e** : pour la portabilité des couleurs
 - **Chemins absolus** : `PROJECT_DIR` et `LOG_DIR` résolus au démarrage via `realpath`
 - **Dégradation gracieuse** : si `jq` absent, le tracking tokens est désactivé (pas de crash)
@@ -104,7 +100,17 @@ orc/                         ← CE REPO (template, jamais modifié par un proje
 - **Placeholders** : `{{VAR}}` dans les phases, substitués par `render_phase()`
 - **Pas de données projet ici** : le template ne contient jamais de BRIEF.md ou config.sh spécifique
 - **Tester la syntaxe** : `bash -n orchestrator.sh` avant chaque commit
-- **Documenter les changements** : après chaque modification, utiliser le skill `maintain-docs` pour mettre à jour la doc impactée (docs/, README, help CLI). Lire `docs/INDEX.md` d'abord pour savoir quoi toucher.
+- **Documenter les changements** : après chaque modification, utiliser le skill `/maintain-docs` pour mettre à jour la doc impactée (docs/, README, help CLI). Lire `docs/INDEX.md` d'abord pour savoir quoi toucher.
+
+## Skills de développement (.claude/skills/)
+
+Skills Claude Code disponibles pour travailler sur orc lui-même :
+
+- `/test-orchestrator` — checklist de validation avant commit : syntaxe bash, shellcheck, cohérence config/phases/docs, dry-run mental
+- `/maintain-docs` — mise à jour de la documentation après chaque changement (docs/, README, help CLI, CLAUDE.md)
+- `/release` — process de release : pré-checks, semver (patch/minor/major), tag git, post-release
+- `/add-phase` — ajouter une nouvelle phase au workflow : créer le prompt, intégrer dans orchestrator.sh, documenter, tester la reprise
+- `/stack-conventions` — conventions de stack (template, copié dans les projets générés)
 
 ## Patterns importants
 
@@ -144,7 +150,10 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 `FUNCTIONAL_CHECK_COMMAND` exécuté après chaque merge de feature ET en fin de run. Garantit que l'app reste fonctionnelle à tout moment. Si échec : cycle de fix dédié, puis re-vérification. Résultat persisté dans `state.json` (`functional_check_passed`).
 
 ### Tracking enrichi (state.json)
-`state.json` contient désormais : `current_feature`, `current_phase`, `phase_started_at`, `run_started_at`, `features_timeline[]` (historique avec status/timing/fix_attempts par feature), `functional_check_passed`. Alimenté par `update_phase_tracking()`, `timeline_add()`, `timeline_update_last()`.
+`state.json` contient désormais : `current_feature`, `current_phase`, `phase_started_at`, `run_started_at`, `features_timeline[]` (historique avec status/timing/fix_attempts par feature), `functional_check_passed`, `run_status`, `run_ended_at`. Alimenté par `update_phase_tracking()`, `timeline_add()`, `timeline_update_last()`.
+
+### Statut de sortie du run
+`run_status` dans `state.json` distingue 4 états : `running` (en cours), `completed` (fin normale), `crashed` (erreur non rattrapée ou signal), `stopped` (arrêt demandé par l'utilisateur). Écrit par `cleanup()` (→ crashed si encore running), la fin du script (→ completed), ou les handlers de stop (→ stopped). Affiché dans `orc status`, `orc dashboard` via `get_run_status()` dans `orc-agent.sh`.
 
 ### Cochage fiable de ROADMAP.md
 `mark_feature_done_bash()` coche la feature dans ROADMAP.md via `sed` après chaque merge réussi. Double sécurité avec le cochage par Claude en phase reflect.
@@ -158,10 +167,8 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 - Fichiers de détail par domaine : `modules.md`, `utilities.md`, `integrations.md`, `data-models.md`, `architecture.md`, `security.md`.
 - `.claude/skills/stack-conventions.md` : conventions spécifiques à la stack, auto-enrichi au fil du projet.
 
-### Séparation orc / produit dans project/
-Les artéfacts orc sont isolés dans `project/.orc/` : BRIEF.md, ROADMAP.md, codebase/, research/, logs/.
-Seuls `CLAUDE.md` et `.claude/skills/` restent à la racine (conventions Claude Code).
-Le produit (README.md, src/, docs/, package.json) n'est pas pollué par l'outillage orc.
+### Structure aplatie du workspace
+Le workspace est un repo git unique. `orchestrator.sh` et `phases/` sont des symlinks vers le template orc (mis à jour automatiquement). Les artéfacts orc sont isolés dans `.orc/` (BRIEF, ROADMAP, codebase, research, state, logs). Le code produit (src/, README, etc.) cohabite à la racine.
 
 ### Contexte adaptatif par phase
 `run_claude()` injecte un contexte différent selon la phase :
@@ -186,6 +193,8 @@ Chaque item a un frontmatter YAML avec : `id`, `priority` (P0-P3), `type`, `effo
 - **Créer un item** : copier `roadmap/TEMPLATE.md`, incrémenter l'ID
 - **Changer de statut** : `mv roadmap/planned/ROADMAP-NNN.md roadmap/in-progress/`
 
-## Version actuelle
+## Versioning
 
-v0.6.0
+Version actuelle : **v0.6.0** (définie dans `orc.sh:ORC_VERSION`)
+
+Semver : **patch** = bugfix/typo, **minor** = nouvelle feature/phase/skill, **major** = changement breaking (format config, structure workspace). Utiliser le skill `/release` pour le process complet.

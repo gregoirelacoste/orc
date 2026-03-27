@@ -50,6 +50,8 @@ PHASE_STARTED_AT=""
 RUN_STARTED_AT=$(date -Iseconds)
 FEATURES_TIMELINE="[]"
 LAST_FUNCTIONAL_CHECK="null"
+RUN_STATUS="running"
+RUN_ENDED_AT=""
 
 # === TRACKING TOKENS ===
 TOKENS_FILE="$SCRIPT_DIR/.orc/tokens.json"
@@ -77,6 +79,12 @@ cleanup() {
   fi
   # Nettoyer le fichier temporaire
   [ -n "$TMP_JSON" ] && rm -f "$TMP_JSON"
+  # Marquer le statut si pas déjà fait (= crash ou signal)
+  if [ "$RUN_STATUS" = "running" ]; then
+    RUN_STATUS="crashed"
+    RUN_ENDED_AT=$(date -Iseconds)
+    log ERROR "Run interrompu (crash ou signal)."
+  fi
   # Sauvegarder l'état
   save_state
   # Libérer le lock
@@ -126,6 +134,8 @@ save_state() {
       --arg run_started_at "${RUN_STARTED_AT:-}" \
       --argjson features_timeline "$timeline_json" \
       --argjson functional_check_passed "${LAST_FUNCTIONAL_CHECK:-null}" \
+      --arg run_status "${RUN_STATUS:-running}" \
+      --arg run_ended_at "${RUN_ENDED_AT:-}" \
       '{
         feature_count: $feature_count,
         epic_feature_count: $epic_feature_count,
@@ -137,12 +147,14 @@ save_state() {
         phase_started_at: $phase_started_at,
         run_started_at: $run_started_at,
         features_timeline: $features_timeline,
-        functional_check_passed: $functional_check_passed
+        functional_check_passed: $functional_check_passed,
+        run_status: $run_status,
+        run_ended_at: $run_ended_at
       }' > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
   else
     # Fallback sans jq — format simple
     cat > "$STATE_FILE" << STATEEOF
-{"feature_count":$FEATURE_COUNT,"epic_feature_count":$EPIC_FEATURE_COUNT,"total_failures":$TOTAL_FAILURES,"evolve_cycles":$EVOLVE_CYCLES,"ai_roadmap_adds":$AI_ROADMAP_ADDS}
+{"feature_count":$FEATURE_COUNT,"epic_feature_count":$EPIC_FEATURE_COUNT,"total_failures":$TOTAL_FAILURES,"evolve_cycles":$EVOLVE_CYCLES,"ai_roadmap_adds":$AI_ROADMAP_ADDS,"run_status":"${RUN_STATUS:-running}","run_ended_at":"${RUN_ENDED_AT:-}"}
 STATEEOF
   fi
 }
@@ -559,6 +571,15 @@ $prompt"
     fi
   fi
 
+  # Détecter error_max_turns — l'implémentation est probablement incomplète
+  if command -v jq &> /dev/null; then
+    local result_subtype
+    result_subtype=$(echo "$json_output" | jq -r '.subtype // ""' 2>/dev/null || true)
+    if [ "$result_subtype" = "error_max_turns" ]; then
+      log WARN "Claude a atteint la limite de turns ($MAX_TURNS_PER_INVOCATION) en phase '$phase_name' — résultat potentiellement incomplet."
+    fi
+  fi
+
   track_tokens "$phase_name" "$feature_name" "$json_output"
 
   if [ -n "${MAX_BUDGET_USD:-}" ]; then
@@ -690,6 +711,8 @@ check_signals() {
     rm -f "$signal_dir/stop-after-feature"
     log INFO "Signal stop-after-feature détecté — arrêt propre après cette feature."
     notify "Arrêt propre demandé — finit la feature en cours."
+    RUN_STATUS="stopped"
+    RUN_ENDED_AT=$(date -Iseconds)
     save_state
     print_cost_summary
     exit 0
@@ -719,8 +742,10 @@ gh_pr_mode() {
 # Récupère le owner/repo depuis le remote git
 gh_repo_slug() {
   local remote="${GITHUB_REMOTE:-origin}"
-  run_in_project "git remote get-url '$remote' 2>/dev/null" \
-    | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##'
+  local url
+  url=$(run_in_project "git remote get-url '$remote' 2>/dev/null" || true)
+  [ -z "$url" ] && return 1
+  echo "$url" | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##'
 }
 
 # Crée l'issue de tracking pour un run orchestrateur
@@ -730,11 +755,7 @@ gh_create_tracking_issue() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
-  if [ -z "$repo_slug" ]; then
-    log WARN "GitHub: impossible de déterminer le repo — tracking issue non créée."
-    return 1
-  fi
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   local body
   body="## 🔄 ORC Orchestrator Run
@@ -763,7 +784,11 @@ _Labels \`orc:pause\`, \`orc:stop\`, \`orc:continue\` peuvent être utilisés co
     }
   }
 
-  TRACKING_ISSUE_NUMBER=$(echo "$issue_url" | grep -oE '[0-9]+$')
+  TRACKING_ISSUE_NUMBER=$(echo "$issue_url" | grep -oE '[0-9]+$' || true)
+  if [ -z "$TRACKING_ISSUE_NUMBER" ]; then
+    log WARN "GitHub: impossible d'extraire le numéro d'issue depuis '$issue_url'."
+    return 1
+  fi
   log INFO "GitHub: tracking issue créée → $issue_url"
 
   # Persister le numéro de l'issue dans .orc/
@@ -786,7 +811,7 @@ gh_comment() {
 
   local message="$1"
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   gh issue comment "$TRACKING_ISSUE_NUMBER" \
     --repo "$repo_slug" \
@@ -802,7 +827,7 @@ gh_create_pr() {
   if ! gh_pr_mode; then return 1; fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
   local remote="${GITHUB_REMOTE:-origin}"
 
   # Push la branche
@@ -849,11 +874,15 @@ gh_merge_pr() {
   if ! gh_pr_mode; then return 1; fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   # Extraire le numéro de PR
   local pr_number
-  pr_number=$(echo "$pr_url" | grep -oE '[0-9]+$')
+  pr_number=$(echo "$pr_url" | grep -oE '[0-9]+$' || true)
+  if [ -z "$pr_number" ]; then
+    log WARN "GitHub: impossible d'extraire le numéro de PR depuis '$pr_url'."
+    return 1
+  fi
 
   if [ "$REQUIRE_HUMAN_APPROVAL" = true ]; then
     log INFO "En attente d'approbation pour PR #$pr_number..."
@@ -967,7 +996,7 @@ gh_check_signals() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   local labels
   labels=$(gh issue view "$TRACKING_ISSUE_NUMBER" \
@@ -1014,7 +1043,7 @@ gh_create_abandoned_issue() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   local body="## Feature abandonnée : $feature_name
 
@@ -1052,7 +1081,7 @@ gh_close_tracking_issue() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   gh_comment "## 🏁 Run terminé
 
@@ -1079,8 +1108,7 @@ gh_sync_roadmap() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
-  if [ -z "$repo_slug" ]; then return 1; fi
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   local roadmap="$PROJECT_DIR/.orc/ROADMAP.md"
   if [ ! -f "$roadmap" ]; then return 0; fi
@@ -1116,7 +1144,8 @@ _Miroir automatique de ROADMAP.md — ne pas modifier cette issue._" \
     }
 
     local issue_num
-    issue_num=$(echo "$issue_url" | grep -oE '[0-9]+$')
+    issue_num=$(echo "$issue_url" | grep -oE '[0-9]+$' || true)
+    [ -z "$issue_num" ] && continue
     echo "$feature_name	$issue_num" >> "$map_file"
     log INFO "GitHub: issue #$issue_num créée pour '$feature_name'"
   done < <(grep '^\- \[ \]' "$roadmap" 2>/dev/null || true)
@@ -1129,7 +1158,7 @@ _Miroir automatique de ROADMAP.md — ne pas modifier cette issue._" \
 
     # Trouver l'issue mappée
     local issue_num
-    issue_num=$(grep -F "$feature_name" "$map_file" 2>/dev/null | tail -1 | cut -f2)
+    issue_num=$(grep -F "$feature_name" "$map_file" 2>/dev/null | tail -1 | cut -f2 || true)
     [ -z "$issue_num" ] && continue
 
     # Fermer si pas déjà fermée
@@ -1155,8 +1184,7 @@ gh_sync_milestone() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
-  if [ -z "$repo_slug" ]; then return 1; fi
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   # Vérifier si le milestone existe déjà
   local existing
@@ -1191,7 +1219,7 @@ gh_read_feedback() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
 
   # Lire les commentaires récents (depuis le dernier check)
   local last_check_file="$SCRIPT_DIR/.orc/gh-feedback-last-check"
@@ -1243,7 +1271,7 @@ gh_wait_ci() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
   local remote="${GITHUB_REMOTE:-origin}"
 
   # S'assurer que la branche est poussée
@@ -1281,7 +1309,7 @@ gh_post_quality_status() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
   local sha
   sha=$(run_in_project "git rev-parse HEAD 2>/dev/null" || echo "")
   [ -z "$sha" ] && return 0
@@ -1303,7 +1331,7 @@ gh_create_release() {
   fi
 
   local repo_slug
-  repo_slug=$(gh_repo_slug)
+  repo_slug=$(gh_repo_slug) || { log WARN "GitHub: remote introuvable — opération ignorée."; return 0; }
   local remote="${GITHUB_REMOTE:-origin}"
 
   # S'assurer que main est poussé
@@ -1645,7 +1673,7 @@ FBEOF
         fi
         echo ""
         ;;
-      q|Q) log INFO "Arrêt demandé par l'utilisateur." ; print_cost_summary ; exit 0 ;;
+      q|Q) log INFO "Arrêt demandé par l'utilisateur." ; RUN_STATUS="stopped" ; RUN_ENDED_AT=$(date -Iseconds) ; print_cost_summary ; exit 0 ;;
       *) echo "Choix invalide." ;;
     esac
   done
@@ -2120,7 +2148,7 @@ if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
 
     if [ ! -f "$PROJECT_DIR/DONE.md" ] && grep -q '^\- \[ \]' "$PROJECT_DIR/.orc/ROADMAP.md" 2>/dev/null; then
       # Compter les features ajoutées par l'IA
-      new_features=$(grep -c '^\- \[ \]' "$PROJECT_DIR/.orc/ROADMAP.md" 2>/dev/null || echo "0")
+      new_features=$(grep -c '^\- \[ \]' "$PROJECT_DIR/.orc/ROADMAP.md" 2>/dev/null || true)
       AI_ROADMAP_ADDS=$((AI_ROADMAP_ADDS + new_features))
       log INFO "Nouvelles features ajoutées par l'IA : $new_features (total IA: $AI_ROADMAP_ADDS)"
 
@@ -2281,6 +2309,8 @@ fi
 
 CURRENT_PHASE="done"
 CURRENT_FEATURE=""
+RUN_STATUS="completed"
+RUN_ENDED_AT=$(date -Iseconds)
 save_state
 
 log PHASE "TERMINÉ"

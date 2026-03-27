@@ -5,7 +5,7 @@
 # ============================================================
 
 # === PROJET ===
-PROJECT_DIR="./project"                  # Dossier du projet généré
+PROJECT_DIR="."                          # Racine du workspace (= le projet)
 PROJECT_NAME=""                          # Nom du projet (rempli par init.sh)
 
 # === GARDE-FOUS ===

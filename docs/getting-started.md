@@ -93,7 +93,7 @@ Voir [configuration.md](configuration.md) pour la liste complète.
 orc agent start mon-projet
 ```
 
-L'orchestrateur tourne en background. Le code est généré dans `~/projects/mon-projet/project/`.
+L'orchestrateur tourne en background. Le code est généré dans `~/projects/mon-projet/`.
 
 ## Suivre
 

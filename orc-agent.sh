@@ -46,18 +46,107 @@ is_running() {
 }
 
 # ============================================================
+# STATUT DU RUN
+# ============================================================
+
+# Détermine le statut d'un projet : running, completed, crashed, stopped
+# Retourne : status_label status_color
+get_run_status() {
+  local name="$1"
+  local dir
+  dir=$(project_dir "$name")
+
+  if [ -f "$dir/DONE.md" ]; then
+    echo "terminé|$GREEN"
+  elif is_running "$name"; then
+    echo "en cours|$CYAN"
+  elif [ -f "$dir/.orc/state.json" ] && command -v jq &>/dev/null; then
+    local saved_status
+    saved_status=$(jq -r '.run_status // ""' "$dir/.orc/state.json" 2>/dev/null)
+    case "$saved_status" in
+      completed) echo "terminé|$GREEN" ;;
+      crashed)   echo "crashé|$RED" ;;
+      stopped)   echo "arrêté|$YELLOW" ;;
+      *)         echo "arrêté|$YELLOW" ;;
+    esac
+  else
+    echo "arrêté|$YELLOW"
+  fi
+}
+
+# ============================================================
+# GITHUB : création repo
+# ============================================================
+
+setup_github_repo() {
+  local name="$1"
+  local visibility="${2:-private}"
+  local dir
+  dir=$(project_dir "$name")
+  command -v gh &>/dev/null || die "GitHub CLI (gh) non installé. Installer : https://cli.github.com"
+  [ -d "$dir/.git" ] || die "Git non initialisé dans $dir"
+
+  if git -C "$dir" remote get-url origin &>/dev/null 2>&1; then
+    die "Remote 'origin' existe déjà : $(git -C "$dir" remote get-url origin)"
+  fi
+
+  # Commit initial si aucun commit
+  if ! git -C "$dir" rev-parse HEAD &>/dev/null 2>&1; then
+    git -C "$dir" add -A > /dev/null 2>&1 || true
+    git -C "$dir" commit -m "chore: initial project structure" --allow-empty > /dev/null 2>&1 || true
+  fi
+
+  local description=""
+  [ -f "$dir/BRIEF.md" ] && description=$(head -1 "$dir/BRIEF.md" | sed 's/^#[[:space:]]*//')
+
+  local gh_output
+  if ! gh_output=$(gh repo create "$name" \
+    --"$visibility" \
+    --source="$dir" \
+    --push \
+    --description "${description:-Projet $name}" 2>&1); then
+    die "gh repo create a échoué :\n  $gh_output"
+  fi
+
+  local repo_url
+  repo_url=$(echo "$gh_output" | head -1)
+  printf "  ${GREEN}✓${NC} Repo GitHub créé : ${CYAN}%s${NC}\n" "${repo_url:-erreur}"
+}
+
+cmd_github() {
+  local name="${1:-}"
+  [ -z "$name" ] && die "Usage : orc agent github <nom> [--public]"
+  require_project "$name"
+  shift
+
+  local visibility="private"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --public)  visibility="public"; shift ;;
+      --private) visibility="private"; shift ;;
+      *) die "Option inconnue : $1" ;;
+    esac
+  done
+
+  printf "${BOLD}Création du repo GitHub pour '%s' (%s)...${NC}\n\n" "$name" "$visibility"
+  setup_github_repo "$name" "$visibility"
+}
+
+# ============================================================
 # COMMANDE : new
 # ============================================================
 
 cmd_new() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : orc agent new <nom> [--brief briefs/x.md] [--no-clarify]"
+  [ -z "$name" ] && die "Usage : orc agent new <nom> [--brief briefs/x.md] [--no-clarify] [--github [public]]"
 
   local dir
   dir=$(project_dir "$name")
   shift
   local brief_file=""
   local no_clarify=false
+  local github_enabled=false
+  local github_visibility="private"
   while [ $# -gt 0 ]; do
     case "$1" in
       --brief)
@@ -67,6 +156,14 @@ cmd_new() {
         ;;
       --no-clarify)
         no_clarify=true
+        shift
+        ;;
+      --github)
+        github_enabled=true
+        if [ -n "${2:-}" ] && [[ "${2:-}" =~ ^(public|private)$ ]]; then
+          github_visibility="$2"
+          shift
+        fi
         shift
         ;;
       *) die "Option inconnue : $1" ;;
@@ -88,25 +185,37 @@ cmd_new() {
 
   # Création/réparation du workspace (idempotent)
   mkdir -p "$dir"
-  cp "$ORC_DIR/orchestrator.sh" "$dir/"
-  cp -r "$ORC_DIR/phases" "$dir/"
-  cp -r "$ORC_DIR/skills-templates" "$dir/"
+  ln -sf "$ORC_DIR/orchestrator.sh" "$dir/orchestrator.sh"
+  ln -sf "$ORC_DIR/phases" "$dir/phases"
   cp "$ORC_DIR/BRIEF.template.md" "$dir/"
-  chmod +x "$dir/orchestrator.sh"
-  mkdir -p "$dir/.orc/logs"
+  mkdir -p "$dir/.orc/logs" \
+           "$dir/.orc/research/competitors" \
+           "$dir/.orc/research/trends" \
+           "$dir/.orc/research/user-needs" \
+           "$dir/.orc/research/regulations"
   [ -f "$dir/.orc/config.sh" ] || cp "$ORC_DIR/config.default.sh" "$dir/.orc/config.sh"
 
-  mkdir -p "$dir/project"
-  [ -d "$dir/project/.git" ] || ( cd "$dir/project" && git init -b main > /dev/null 2>&1 )
+  [ -d "$dir/.git" ] || ( cd "$dir" && git init -b main > /dev/null 2>&1 )
 
-  mkdir -p "$dir/project/.orc/research/competitors" \
-           "$dir/project/.orc/research/trends" \
-           "$dir/project/.orc/research/user-needs" \
-           "$dir/project/.orc/research/regulations" \
-           "$dir/project/.orc/logs"
+  # .gitignore (symlinks + state runtime)
+  if [ ! -f "$dir/.gitignore" ]; then
+    cat > "$dir/.gitignore" << 'GITIGNORE'
+# Symlinks vers le template orc
+orchestrator.sh
+phases
 
-  mkdir -p "$dir/project/.claude/skills"
-  cp "$dir/skills-templates/"*.md "$dir/project/.claude/skills/"
+# État runtime orchestrateur
+.orc/logs/
+.orc/state.json
+.orc/tokens.json
+.orc/.lock
+.orc/.pid
+.orc/tracking-issue
+GITIGNORE
+  fi
+
+  mkdir -p "$dir/.claude/skills"
+  cp "$ORC_DIR/skills-templates/"*.md "$dir/.claude/skills/"
 
   if [ "$resume" = true ]; then
     printf "  ${GREEN}✓${NC} Workspace réparé : %s\n" "$dir"
@@ -131,7 +240,7 @@ cmd_new() {
       printf "\n  ${CYAN}Claude va analyser le brief et poser des questions pour le clarifier...${NC}\n\n"
 
       local clarify_skill
-      clarify_skill=$(cat "$dir/skills-templates/clarify-brief.md")
+      clarify_skill=$(cat "$ORC_DIR/skills-templates/clarify-brief.md")
 
       ( cd "$dir" && claude --max-turns 40 -- "$clarify_skill
 
@@ -148,12 +257,12 @@ Pose des questions pour clarifier les zones floues, puis enrichis le brief." )
       fi
     fi
 
-    cp "$dir/BRIEF.md" "$dir/project/.orc/BRIEF.md"
+    cp "$dir/BRIEF.md" "$dir/.orc/BRIEF.md"
   else
     printf "\n  ${CYAN}Claude va te poser des questions pour rédiger le brief...${NC}\n\n"
 
     local brief_skill
-    brief_skill=$(cat "$dir/skills-templates/write-brief.md")
+    brief_skill=$(cat "$ORC_DIR/skills-templates/write-brief.md")
 
     ( cd "$dir" && claude --max-turns 40 -- "$brief_skill
 
@@ -163,12 +272,18 @@ L'utilisateur crée un projet appelé \"$name\".
 Pose les questions une par une. Écris le résultat dans BRIEF.md." )
 
     if [ -f "$dir/BRIEF.md" ]; then
-      cp "$dir/BRIEF.md" "$dir/project/.orc/BRIEF.md"
+      cp "$dir/BRIEF.md" "$dir/.orc/BRIEF.md"
       printf "\n  ${GREEN}✓${NC} Brief rédigé\n"
     else
       printf "\n  ${YELLOW}⚠${NC} Brief non créé. Rédige-le manuellement :\n"
       printf "    ${CYAN}vim %s/BRIEF.md${NC}\n" "$dir"
     fi
+  fi
+
+  # GitHub repo
+  if [ "$github_enabled" = true ]; then
+    echo ""
+    setup_github_repo "$name" "$github_visibility"
   fi
 
   echo ""
@@ -350,10 +465,10 @@ estimate_remaining() {
   local avg_per_feature=$((elapsed / feat_count))
 
   # Compter les features restantes dans la roadmap
-  local roadmap="$dir/project/.orc/ROADMAP.md"
+  local roadmap="$dir/.orc/ROADMAP.md"
   [ -f "$roadmap" ] || return
   local remaining
-  remaining=$(grep -c '^\- \[ \]' "$roadmap" 2>/dev/null || echo "0")
+  remaining=$(grep -c '^\- \[ \]' "$roadmap" 2>/dev/null || true)
   [ "$remaining" -eq 0 ] && return
 
   local eta_s=$((avg_per_feature * remaining))
@@ -395,17 +510,10 @@ cmd_status() {
     local proj_name
     proj_name=$(basename "$proj_dir")
 
-    local status status_color
-    if [ -f "$proj_dir/project/DONE.md" ]; then
-      status="done"
-      status_color="$GREEN"
-    elif is_running "$proj_name"; then
-      status="running"
-      status_color="$CYAN"
-    else
-      status="stopped"
-      status_color="$YELLOW"
-    fi
+    local status status_color run_info
+    run_info=$(get_run_status "$proj_name")
+    status="${run_info%%|*}"
+    status_color="${run_info##*|}"
 
     local feat_count="0" max_feat="?" failures="0"
     if [ -f "$proj_dir/.orc/state.json" ]; then
@@ -424,10 +532,10 @@ cmd_status() {
     fi
 
     local remaining="—" pct_str="—"
-    if [ -f "$proj_dir/project/.orc/ROADMAP.md" ]; then
+    if [ -f "$proj_dir/.orc/ROADMAP.md" ]; then
       local done_count todo
-      done_count=$(grep -c '^\- \[x\]' "$proj_dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
-      todo=$(grep -c '^\- \[ \]' "$proj_dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
+      done_count=$(grep -c '^\- \[x\]' "$proj_dir/.orc/ROADMAP.md" 2>/dev/null || true)
+      todo=$(grep -c '^\- \[ \]' "$proj_dir/.orc/ROADMAP.md" 2>/dev/null || true)
       local total_feats=$((done_count + todo))
       if [ "$todo" -eq 0 ] && [ "$status" = "done" ]; then
         remaining="terminé"
@@ -467,15 +575,21 @@ cmd_status_detail() {
 
   # Status + durée
   local is_done=false
-  if [ -f "$dir/project/DONE.md" ]; then
-    printf "  Status : ${GREEN}terminé${NC}\n"
+  local run_info status_label status_color
+  run_info=$(get_run_status "$name")
+  status_label="${run_info%%|*}"
+  status_color="${run_info##*|}"
+
+  if [ -f "$dir/DONE.md" ]; then
     is_done=true
-  elif is_running "$name"; then
+  fi
+
+  if is_running "$name"; then
     local pid
     pid=$(cat "$dir/.orc/.pid")
-    printf "  Status : ${CYAN}en cours${NC} (PID %s)\n" "$pid"
+    printf "  Status : ${status_color}%s${NC} (PID %s)\n" "$status_label" "$pid"
   else
-    printf "  Status : ${YELLOW}arrêté${NC}\n"
+    printf "  Status : ${status_color}%s${NC}\n" "$status_label"
   fi
 
   # Durée du run
@@ -518,10 +632,10 @@ cmd_status_detail() {
   fi
 
   # Progress bar + roadmap
-  if [ -f "$dir/project/.orc/ROADMAP.md" ]; then
+  if [ -f "$dir/.orc/ROADMAP.md" ]; then
     local done_count todo total_feats
-    done_count=$(grep -c '^\- \[x\]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
-    todo=$(grep -c '^\- \[ \]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
+    done_count=$(grep -c '^\- \[x\]' "$dir/.orc/ROADMAP.md" 2>/dev/null || true)
+    todo=$(grep -c '^\- \[ \]' "$dir/.orc/ROADMAP.md" 2>/dev/null || true)
     total_feats=$((done_count + todo))
     echo ""
     printf "  Progress  "
@@ -816,7 +930,7 @@ cmd_roadmap() {
         done)        status_label="TERMINÉ" ;;
         *)           status_label="$status" ;;
       esac
-      count_in_status=$(echo "$sorted_items" | grep -c "|${status}|" 2>/dev/null || echo "0")
+      count_in_status=$(echo "$sorted_items" | grep -c "|${status}|" 2>/dev/null || true)
       echo ""
       printf " ${BOLD}%s${NC} (%d)\n" "$status_label" "$count_in_status"
     fi
@@ -913,15 +1027,15 @@ cmd_project_roadmap() {
 
   local dir
   dir=$(project_dir "$name")
-  local roadmap_file="$dir/project/.orc/ROADMAP.md"
+  local roadmap_file="$dir/.orc/ROADMAP.md"
 
   if [ ! -f "$roadmap_file" ]; then
     die "Pas de ROADMAP.md pour '$name' (le projet n'a peut-être pas encore démarré)"
   fi
 
   local done_count todo_count
-  done_count=$(grep -c '^\- \[x\]' "$roadmap_file" 2>/dev/null || echo "0")
-  todo_count=$(grep -c '^\- \[ \]' "$roadmap_file" 2>/dev/null || echo "0")
+  done_count=$(grep -c '^\- \[x\]' "$roadmap_file" 2>/dev/null || true)
+  todo_count=$(grep -c '^\- \[ \]' "$roadmap_file" 2>/dev/null || true)
 
   echo ""
   printf "${BOLD}ROADMAP — %s${NC}" "$name"
@@ -1006,7 +1120,7 @@ cmd_dashboard() {
   dir=$(project_dir "$name")
   local state_file="$dir/.orc/state.json"
   local tokens_file="$dir/.orc/tokens.json"
-  local roadmap_file="$dir/project/.orc/ROADMAP.md"
+  local roadmap_file="$dir/.orc/ROADMAP.md"
   local logfile="$dir/.orc/logs/orchestrator.log"
   local config_file="$dir/.orc/config.sh"
 
@@ -1022,17 +1136,10 @@ cmd_dashboard() {
     clear
 
     # === HEADER ===
-    local status status_color
-    if [ -f "$dir/project/DONE.md" ]; then
-      status="terminé"
-      status_color="$GREEN"
-    elif is_running "$name"; then
-      status="en cours"
-      status_color="$CYAN"
-    else
-      status="arrêté"
-      status_color="$YELLOW"
-    fi
+    local status status_color run_info
+    run_info=$(get_run_status "$name")
+    status="${run_info%%|*}"
+    status_color="${run_info##*|}"
 
     local duration="—"
     if [ -f "$state_file" ] && command -v jq &> /dev/null; then
@@ -1079,8 +1186,8 @@ cmd_dashboard() {
 
     local done_count=0 todo_count=0 total_feats=0
     if [ -f "$roadmap_file" ]; then
-      done_count=$(grep -c '^\- \[x\]' "$roadmap_file" 2>/dev/null || echo "0")
-      todo_count=$(grep -c '^\- \[ \]' "$roadmap_file" 2>/dev/null || echo "0")
+      done_count=$(grep -c '^\- \[x\]' "$roadmap_file" 2>/dev/null || true)
+      todo_count=$(grep -c '^\- \[ \]' "$roadmap_file" 2>/dev/null || true)
       total_feats=$((done_count + todo_count))
     fi
 
@@ -1227,6 +1334,7 @@ agent_dispatch() {
     status)    cmd_status "$@" ;;
     logs)      cmd_logs "$@" ;;
     dashboard) cmd_dashboard "$@" ;;
+    github)    cmd_github "$@" ;;
     update)    cmd_update ;;
     help|-h|--help) cmd_agent_help ;;
     *) die "Commande inconnue : agent $subcmd. Voir : orc agent help" ;;

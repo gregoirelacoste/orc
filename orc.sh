@@ -36,6 +36,22 @@ NC='\033[0m'
 
 die() { printf "${RED}Erreur : %s${NC}\n" "$1" >&2; exit 1; }
 
+# === MARKDOWN RENDERER ===
+render_markdown() {
+  local file="$1"
+  if command -v glow &>/dev/null; then
+    glow -p "$file"
+  elif command -v batcat &>/dev/null; then
+    batcat --style=plain --paging=always --language=md "$file"
+  elif command -v bat &>/dev/null; then
+    bat --style=plain --paging=always --language=md "$file"
+  elif command -v less &>/dev/null; then
+    less "$file"
+  else
+    cat "$file"
+  fi
+}
+
 # ============================================================
 # HELP
 # ============================================================
@@ -47,6 +63,8 @@ orc_help() {
   printf "  ${BOLD}Projets :${NC}\n"
   printf "    ${CYAN}orc agent new <nom>${NC}               Créer (wizard interactif)\n"
   printf "    ${CYAN}orc agent new <nom> --brief x.md${NC}  Créer depuis un brief (+ clarification IA)\n"
+  printf "    ${CYAN}orc agent new <nom> --github${NC}      Créer + repo GitHub (private par défaut)\n"
+  printf "    ${CYAN}orc agent github <nom>${NC}            Créer le repo GitHub d'un projet existant\n"
   printf "    ${CYAN}orc agent start <nom>${NC}             Lancer en background\n"
   printf "    ${CYAN}orc agent stop <nom>${NC}              Arrêter proprement\n"
   printf "    ${CYAN}orc agent status${NC}                  Vue d'ensemble (avec progression)\n"
@@ -132,12 +150,7 @@ cmd_docs() {
   esac
 
   if [ -f "$docs_dir/$file" ]; then
-    # Utiliser less si disponible, sinon cat
-    if command -v less &>/dev/null; then
-      less "$docs_dir/$file"
-    else
-      cat "$docs_dir/$file"
-    fi
+    render_markdown "$docs_dir/$file"
   else
     die "Fichier non trouvé : $docs_dir/$file"
   fi

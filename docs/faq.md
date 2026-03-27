@@ -4,7 +4,7 @@
 
 ### Le workspace est-il un repo git ?
 
-Non. Seul `project/` à l'intérieur a son propre git. Le workspace (`~/projects/mon-projet/`) contient l'orchestrateur, les phases et la config.
+Oui. Le workspace est directement le repo git du projet. `orchestrator.sh` et `phases/` sont des symlinks vers le template orc (ignorés par `.gitignore`).
 
 ### Puis-je lancer plusieurs projets en parallèle ?
 

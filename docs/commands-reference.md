@@ -12,11 +12,14 @@ Crée un nouveau projet.
 | `--brief <fichier>` | Utilise un brief existant. Claude le lit, pose des questions, l'enrichit |
 | `--brief <fichier> --no-clarify` | Copie le brief tel quel sans clarification |
 | `--skip-brief` | Copie le template vide (à remplir manuellement) |
+| `--github [public\|private]` | Crée aussi le repo GitHub (private par défaut) |
 
 ```bash
 orc agent new mon-app
 orc agent new mon-app --brief briefs/idee.md
 orc agent new mon-app --brief spec.md --no-clarify
+orc agent new mon-app --brief spec.md --no-clarify --github
+orc agent new mon-app --github public
 ```
 
 ### `orc agent start <nom>`
@@ -39,9 +42,18 @@ orc agent stop mon-app
 
 Stop + start en une commande.
 
+### `orc agent github <nom> [--public]`
+
+Crée un repo GitHub pour un projet existant. Utile si le repo n'a pas été créé à l'init. Vérifie que le remote n'existe pas déjà.
+
+```bash
+orc agent github mon-app            # Repo privé
+orc agent github mon-app --public   # Repo public
+```
+
 ### `orc agent status [nom]`
 
-Sans argument : vue d'ensemble de tous les projets (running/stopped, features, coût, progression %).
+Sans argument : vue d'ensemble de tous les projets avec statut (en cours / terminé / crashé / arrêté), features, coût, progression.
 Avec argument : détail d'un projet avec barre de progression, feature en cours, phase, ETA estimée, état fonctionnel de l'app.
 
 ```bash
@@ -172,4 +184,4 @@ Le wizard original avec 5 étapes (nom, description, config, workspace, brief). 
 ./init.sh mon-projet --skip-brief
 ```
 
-Différence avec `orc agent new` : inclut la configuration interactive (mode d'autonomie, recherche, max features) et la création de repo GitHub.
+Différence avec `orc agent new` : inclut la configuration interactive (mode d'autonomie, recherche, max features) et propose la création de repo GitHub en fin de wizard.

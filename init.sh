@@ -185,13 +185,12 @@ echo ""
 # Créer le workspace
 mkdir -p "$WORKSPACE_DIR"
 
-# Copier les fichiers de l'orchestrateur
-cp "$TEMPLATE_DIR/orchestrator.sh" "$WORKSPACE_DIR/"
-cp -r "$TEMPLATE_DIR/phases" "$WORKSPACE_DIR/"
-cp -r "$TEMPLATE_DIR/skills-templates" "$WORKSPACE_DIR/"
+# Symlinks vers le template (pas de copie)
+ln -sf "$TEMPLATE_DIR/orchestrator.sh" "$WORKSPACE_DIR/orchestrator.sh"
+ln -sf "$TEMPLATE_DIR/phases" "$WORKSPACE_DIR/phases"
 cp "$TEMPLATE_DIR/BRIEF.template.md" "$WORKSPACE_DIR/"
 
-echo -e "  ${GREEN}✓${NC} Orchestrateur copié"
+echo -e "  ${GREEN}✓${NC} Orchestrateur lié (symlinks)"
 
 # Créer .orc/ — état et config orchestrateur
 mkdir -p "$WORKSPACE_DIR/.orc/logs"
@@ -207,42 +206,36 @@ sed \
 
 echo -e "  ${GREEN}✓${NC} .orc/config.sh généré"
 
-# Créer project/ avec son propre git
-mkdir -p "$WORKSPACE_DIR/project"
-cd "$WORKSPACE_DIR/project" && git init -b main > /dev/null 2>&1 && cd - > /dev/null
+# Initialiser git dans le workspace
+cd "$WORKSPACE_DIR" && git init -b main > /dev/null 2>&1 && cd - > /dev/null
 
-echo -e "  ${GREEN}✓${NC} project/ initialisé (git indépendant)"
+echo -e "  ${GREEN}✓${NC} Git initialisé"
 
-# Créer la structure .orc/ dans project/
-mkdir -p "$WORKSPACE_DIR/project/.orc" \
-         "$WORKSPACE_DIR/project/.orc/research/competitors" \
-         "$WORKSPACE_DIR/project/.orc/research/trends" \
-         "$WORKSPACE_DIR/project/.orc/research/user-needs" \
-         "$WORKSPACE_DIR/project/.orc/research/regulations" \
-         "$WORKSPACE_DIR/project/.orc/logs"
+# Structure .orc/ (research, logs)
+mkdir -p "$WORKSPACE_DIR/.orc/research/competitors" \
+         "$WORKSPACE_DIR/.orc/research/trends" \
+         "$WORKSPACE_DIR/.orc/research/user-needs" \
+         "$WORKSPACE_DIR/.orc/research/regulations"
 
-echo -e "  ${GREEN}✓${NC} Structure .orc/ créée dans project/"
+# Copier les skills depuis le template
+mkdir -p "$WORKSPACE_DIR/.claude/skills"
+cp "$TEMPLATE_DIR/skills-templates/"*.md "$WORKSPACE_DIR/.claude/skills/"
 
-# Copier les skills templates dans project/
-mkdir -p "$WORKSPACE_DIR/project/.claude/skills"
-cp "$WORKSPACE_DIR/skills-templates/"*.md "$WORKSPACE_DIR/project/.claude/skills/"
-
-echo -e "  ${GREEN}✓${NC} Skills copiées dans project/.claude/skills/"
-
-# .orc/logs/ déjà créé ci-dessus
-echo -e "  ${GREEN}✓${NC} Dossier .orc/ prêt (config, logs, state)"
+echo -e "  ${GREEN}✓${NC} Skills, .orc/ et .claude/ prêts"
 
 # Créer .gitignore pour le workspace
 cat > "$WORKSPACE_DIR/.gitignore" << 'GITIGNORE'
-# Projet généré (a son propre git)
-project/
+# Symlinks vers le template orc (pas à commiter)
+orchestrator.sh
+phases
 
-# État runtime orchestrateur (dans .orc/)
+# État runtime orchestrateur
 .orc/logs/
 .orc/state.json
 .orc/tokens.json
 .orc/.lock
 .orc/.pid
+.orc/tracking-issue
 GITIGNORE
 
 echo -e "  ${GREEN}✓${NC} .gitignore créé"
@@ -342,10 +335,9 @@ EOF
   fi
 fi
 
-# Copier le brief dans project/.orc/ (cohérent avec orc-agent.sh)
+# Copier le brief dans .orc/ (cohérent avec orc-agent.sh)
 if [ -f "$WORKSPACE_DIR/BRIEF.md" ]; then
-  mkdir -p "$WORKSPACE_DIR/project/.orc"
-  cp "$WORKSPACE_DIR/BRIEF.md" "$WORKSPACE_DIR/project/.orc/BRIEF.md"
+  cp "$WORKSPACE_DIR/BRIEF.md" "$WORKSPACE_DIR/.orc/BRIEF.md"
 fi
 
 echo ""
@@ -364,17 +356,18 @@ if [ "$HAS_GH" = true ]; then
     read -rp "  Visibilité [public/private] (défaut: private) : " GH_VISIBILITY
     GH_VISIBILITY="${GH_VISIBILITY:-private}"
 
-    cd "$WORKSPACE_DIR/project"
-    git add -A > /dev/null 2>&1 || true
-    git commit -m "chore: initial project structure" --allow-empty > /dev/null 2>&1 || true
+    # Commit initial si aucun commit
+    if ! git -C "$WORKSPACE_DIR" rev-parse HEAD &>/dev/null 2>&1; then
+      git -C "$WORKSPACE_DIR" add -A > /dev/null 2>&1 || true
+      git -C "$WORKSPACE_DIR" commit -m "chore: initial project structure" --allow-empty > /dev/null 2>&1 || true
+    fi
 
     REPO_URL=$(gh repo create "$PROJECT_SLUG" \
       --"$GH_VISIBILITY" \
-      --source=. \
+      --source="$WORKSPACE_DIR" \
       --push \
       --description "$PROJECT_DESCRIPTION" 2>&1 | head -1) || true
 
-    cd - > /dev/null
     echo -e "  ${GREEN}✓${NC} Repo créé : ${CYAN}${REPO_URL:-erreur}${NC}"
   fi
 fi
@@ -398,11 +391,10 @@ echo ""
 echo -e "  ${BOLD}Structure :${NC}"
 echo -e "    $PROJECT_SLUG/"
 echo -e "    ├── BRIEF.md            $([ -f "$WORKSPACE_DIR/BRIEF.md" ] && echo -e "${GREEN}✓${NC}" || echo -e "${YELLOW}à rédiger${NC}")"
-echo -e "    ├── orchestrator.sh     ${GREEN}✓${NC}"
-echo -e "    ├── phases/             ${GREEN}✓${NC}"
-echo -e "    ├── skills-templates/   ${GREEN}✓${NC}"
-echo -e "    ├── .orc/               ${GREEN}✓${NC} (config, logs, state)"
-echo -e "    └── project/            ${GREEN}✓${NC} (git indépendant)"
+echo -e "    ├── orchestrator.sh     ${GREEN}→${NC} symlink"
+echo -e "    ├── phases/             ${GREEN}→${NC} symlink"
+echo -e "    ├── .orc/               ${GREEN}✓${NC} (config, logs, state, roadmap)"
+echo -e "    └── .claude/skills/     ${GREEN}✓${NC}"
 echo ""
 echo -e "  ${BOLD}Prochaines étapes :${NC}"
 echo -e "    ${CYAN}cd $WORKSPACE_DIR${NC}"

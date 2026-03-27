@@ -49,7 +49,7 @@ Tue le process Claude en cours, sauvegarde l'état, libère le lock.
 ## Feedback structuré
 
 ```bash
-vim ~/projects/mon-projet/project/logs/human-feedback-N.md
+vim ~/projects/mon-projet/.orc/logs/human-feedback-N.md
 ```
 
 Feedback numéroté et structuré, prioritaire sur les observations de l'IA. Créé automatiquement lors des pauses en mode supervisé.
