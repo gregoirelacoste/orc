@@ -118,11 +118,11 @@ cmd_new() {
   ( cd "$dir/project" && git init -b main > /dev/null 2>&1 )
 
   # Structure research/
-  mkdir -p "$dir/project/research/competitors" \
-           "$dir/project/research/trends" \
-           "$dir/project/research/user-needs" \
-           "$dir/project/research/regulations" \
-           "$dir/project/logs"
+  mkdir -p "$dir/project/.orc/research/competitors" \
+           "$dir/project/.orc/research/trends" \
+           "$dir/project/.orc/research/user-needs" \
+           "$dir/project/.orc/research/regulations" \
+           "$dir/project/.orc/logs"
 
   # Skills
   mkdir -p "$dir/project/.claude/skills"

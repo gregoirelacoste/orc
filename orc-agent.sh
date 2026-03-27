@@ -333,9 +333,9 @@ cmd_status() {
     fi
 
     local remaining="—"
-    if [ -f "$proj_dir/project/ROADMAP.md" ]; then
+    if [ -f "$proj_dir/project/.orc/ROADMAP.md" ]; then
       local todo
-      todo=$(grep -c '^\- \[ \]' "$proj_dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+      todo=$(grep -c '^\- \[ \]' "$proj_dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
       if [ "$todo" -eq 0 ] && [ "$status" = "done" ]; then
         remaining="terminé"
       else
@@ -397,10 +397,10 @@ cmd_status_detail() {
     printf "  Modèle : %s\n" "$(cat "$model_file")"
   fi
 
-  if [ -f "$dir/project/ROADMAP.md" ]; then
+  if [ -f "$dir/project/.orc/ROADMAP.md" ]; then
     local done_count todo
-    done_count=$(grep -c '^\- \[x\]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
-    todo=$(grep -c '^\- \[ \]' "$dir/project/ROADMAP.md" 2>/dev/null || echo "0")
+    done_count=$(grep -c '^\- \[x\]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
+    todo=$(grep -c '^\- \[ \]' "$dir/project/.orc/ROADMAP.md" 2>/dev/null || echo "0")
     printf "  Roadmap : %s faites, %s restantes\n" "$done_count" "$todo"
   fi
 
@@ -759,7 +759,7 @@ cmd_project_roadmap() {
 
   local dir
   dir=$(project_dir "$name")
-  local roadmap_file="$dir/project/ROADMAP.md"
+  local roadmap_file="$dir/project/.orc/ROADMAP.md"
 
   if [ ! -f "$roadmap_file" ]; then
     die "Pas de ROADMAP.md pour '$name' (le projet n'a peut-être pas encore démarré)"
