@@ -133,6 +133,202 @@ cmd_github() {
 }
 
 # ============================================================
+# ENV : configuration des variables d'environnement
+# ============================================================
+
+cmd_env() {
+  local name="${1:-}"
+  [ -z "$name" ] && die "Usage : orc agent env <nom>"
+  require_project "$name"
+
+  local dir
+  dir=$(project_dir "$name")
+
+  # Chercher le fichier template (.env.example, .env.template, .env.sample)
+  local env_template=""
+  for candidate in ".env.example" ".env.template" ".env.sample"; do
+    if [ -f "$dir/$candidate" ]; then
+      env_template="$dir/$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$env_template" ]; then
+    die "Aucun fichier .env.example trouvé dans $dir"
+  fi
+
+  local env_file="$dir/.env.local"
+
+  # Header
+  echo ""
+  if [ -f "$env_file" ] && ! grep -q 'your_' "$env_file" 2>/dev/null; then
+    printf "${BOLD}Variables d'environnement de '%s'${NC}\n" "$name"
+    printf "${DIM}Appuie sur Entrée pour garder la valeur actuelle.${NC}\n"
+  else
+    printf "${BOLD}Configuration des variables d'environnement de '%s'${NC}\n" "$name"
+    printf "${DIM}Colle les valeurs depuis ton dashboard. Entrée = passer.${NC}\n"
+  fi
+
+  local tmp_env
+  tmp_env=$(mktemp)
+
+  while IFS= read -r line; do
+    # Lignes vides : recopier
+    if [[ -z "$line" ]]; then
+      echo "" >> "$tmp_env"
+      continue
+    fi
+
+    # Commentaires : afficher comme section + aide contextuelle
+    if [[ "$line" =~ ^[[:space:]]*# ]]; then
+      echo "$line" >> "$tmp_env"
+      local section="${line#\#}"
+      section="${section# }"
+      echo ""
+      printf "  ${BOLD}── %s ──${NC}\n" "$section"
+      # Aide contextuelle pour les services connus
+      _env_hint "$section"
+      continue
+    fi
+
+    local key value current_value
+    key="${line%%=*}"
+    value="${line#*=}"
+    key=$(echo "$key" | xargs)  # trim
+
+    [ -z "$key" ] && continue
+
+    # Chercher la valeur actuelle dans .env.local
+    current_value=""
+    if [ -f "$env_file" ]; then
+      current_value=$(grep "^${key}=" "$env_file" 2>/dev/null | head -1 | cut -d= -f2- || true)
+    fi
+
+    # Afficher le prompt
+    if [ -n "$current_value" ] && [[ ! "$current_value" =~ ^your_ ]]; then
+      local display_val
+      if [[ "$key" =~ KEY|SECRET|TOKEN|PASSWORD ]]; then
+        if [ ${#current_value} -gt 8 ]; then
+          display_val="***${current_value: -4}"
+        else
+          display_val="***"
+        fi
+      else
+        display_val="$current_value"
+      fi
+      printf "  ${CYAN}%-40s${NC} ${DIM}[%s]${NC} : " "$key" "$display_val"
+    else
+      printf "  ${CYAN}%-40s${NC} : " "$key"
+    fi
+
+    local input
+    read -r input < /dev/tty
+
+    # Priorité : input > existant > template
+    if [ -n "$input" ]; then
+      echo "$key=$input" >> "$tmp_env"
+    elif [ -n "$current_value" ] && [[ ! "$current_value" =~ ^your_ ]]; then
+      echo "$key=$current_value" >> "$tmp_env"
+    elif [[ ! "$value" =~ ^your_ ]] && [ -n "$value" ]; then
+      echo "$key=$value" >> "$tmp_env"
+    else
+      echo "$key=" >> "$tmp_env"
+    fi
+  done < "$env_template"
+
+  # Écrire le fichier final
+  mv "$tmp_env" "$env_file"
+  chmod 600 "$env_file"
+
+  local final_count empty_count
+  final_count=$(grep -c '=' "$env_file" 2>/dev/null || true)
+  empty_count=$(grep -c '=$' "$env_file" 2>/dev/null || true)
+
+  echo ""
+  printf "  ${GREEN}✓${NC} .env.local écrit (%s variables" "$final_count"
+  if [ "$empty_count" -gt 0 ]; then
+    printf ", ${YELLOW}%s vides${NC}" "$empty_count"
+  fi
+  printf ")\n"
+  printf "  ${DIM}Fichier : %s (chmod 600)${NC}\n" "$env_file"
+
+  # Effacer action-required si présent
+  rm -f "$dir/.orc/action-required"
+  echo ""
+}
+
+# Aide contextuelle pour les services courants
+_env_hint() {
+  local section="$1"
+  case "${section,,}" in
+    *supabase*)
+      printf "  ${DIM}→ Dashboard : https://supabase.com/dashboard/project/_/settings/api${NC}\n" ;;
+    *openai*)
+      printf "  ${DIM}→ API keys : https://platform.openai.com/api-keys${NC}\n" ;;
+    *stripe*)
+      printf "  ${DIM}→ API keys : https://dashboard.stripe.com/apikeys${NC}\n" ;;
+    *firebase*|*google*|*gemini*)
+      printf "  ${DIM}→ Console : https://console.cloud.google.com/apis/credentials${NC}\n" ;;
+    *github*)
+      printf "  ${DIM}→ Tokens : https://github.com/settings/tokens${NC}\n" ;;
+    *resend*)
+      printf "  ${DIM}→ API keys : https://resend.com/api-keys${NC}\n" ;;
+    *cloudflare*|*turnstile*)
+      printf "  ${DIM}→ Dashboard : https://dash.cloudflare.com/?to=/:account/turnstile${NC}\n" ;;
+    *anthropic*|*claude*)
+      printf "  ${DIM}→ API keys : https://console.anthropic.com/settings/keys${NC}\n" ;;
+    *vercel*)
+      printf "  ${DIM}→ Settings : https://vercel.com/account/tokens${NC}\n" ;;
+    *aws*|*s3*)
+      printf "  ${DIM}→ Console : https://console.aws.amazon.com/iam/home#/security_credentials${NC}\n" ;;
+    *database*|*postgres*|*mysql*)
+      printf "  ${DIM}→ Connection string depuis ton provider (Supabase, Neon, PlanetScale...)${NC}\n" ;;
+    *redis*)
+      printf "  ${DIM}→ Dashboard : https://app.redislabs.com/ ou Upstash${NC}\n" ;;
+    *api*|*ia*|*ai*)
+      printf "  ${DIM}→ Clés API depuis le dashboard de chaque provider${NC}\n" ;;
+  esac
+}
+
+# Vérifie les env vars avant le start (appelé par cmd_start)
+preflight_env() {
+  local dir="$1" name="$2"
+
+  # Chercher un fichier template
+  local env_template=""
+  for candidate in ".env.example" ".env.template" ".env.sample"; do
+    if [ -f "$dir/$candidate" ]; then
+      env_template="$dir/$candidate"
+      break
+    fi
+  done
+  [ -z "$env_template" ] && return 0
+
+  # Si .env.local existe et n'a pas de placeholder, OK
+  if [ -f "$dir/.env.local" ] && ! grep -q 'your_' "$dir/.env.local" 2>/dev/null; then
+    return 0
+  fi
+
+  # Si .env existe et n'a pas de placeholder, OK
+  if [ -f "$dir/.env" ] && ! grep -q 'your_' "$dir/.env" 2>/dev/null; then
+    return 0
+  fi
+
+  echo ""
+  printf "${YELLOW}Variables d'environnement non configurées${NC}\n"
+  printf "  Fichier ${CYAN}%s${NC} détecté mais pas de .env.local\n\n" "$(basename "$env_template")"
+  printf "  Configurer maintenant ? [O/n] : "
+  read -r choice
+  choice="${choice:-O}"
+
+  if [[ "$choice" =~ ^[OoYy]$ ]]; then
+    cmd_env "$name"
+  else
+    printf "\n  ${DIM}Tu peux configurer plus tard : orc agent env %s${NC}\n\n" "$name"
+  fi
+}
+
+# ============================================================
 # COMMANDE : new
 # ============================================================
 
@@ -299,8 +495,22 @@ Pose les questions une par une. Écris le résultat dans BRIEF.md." )
 
 cmd_start() {
   local name="${1:-}"
-  [ -z "$name" ] && die "Usage : orc agent start <nom>"
+  [ -z "$name" ] && die "Usage : orc agent start <nom> [--prompt \"directive\"]"
   require_project "$name"
+  shift
+
+  # Parse options
+  local user_prompt=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --prompt|-p)
+        user_prompt="${2:-}"
+        [ -z "$user_prompt" ] && die "--prompt nécessite un texte"
+        shift 2
+        ;;
+      *) die "Option inconnue : $1" ;;
+    esac
+  done
 
   local dir
   dir=$(project_dir "$name")
@@ -327,6 +537,21 @@ cmd_start() {
     export CLAUDE_MODEL
     CLAUDE_MODEL=$(cat "$model_file")
   fi
+
+  # Injecter le prompt dans human-notes.md
+  if [ -n "$user_prompt" ]; then
+    local notes_file="$dir/.orc/human-notes.md"
+    {
+      [ -f "$notes_file" ] && [ -s "$notes_file" ] && echo ""
+      echo "## Directive de lancement ($(date '+%Y-%m-%d %H:%M'))"
+      echo ""
+      echo "$user_prompt"
+    } >> "$notes_file"
+    printf "${DIM}Directive injectée dans .orc/human-notes.md${NC}\n"
+  fi
+
+  # Vérifier les variables d'environnement
+  preflight_env "$dir" "$name"
 
   mkdir -p "$dir/.orc/logs"
   nohup bash -c "cd \"$dir\" && exec ./orchestrator.sh" >> "$dir/.orc/logs/orchestrator.log" 2>&1 &
@@ -672,6 +897,13 @@ cmd_status_detail() {
     fi
   fi
 
+  # Action requise
+  if [ -f "$dir/.orc/action-required" ]; then
+    echo ""
+    printf "  ${RED}${BOLD}── Action requise ──${NC}\n"
+    sed 's/^/  /' "$dir/.orc/action-required"
+  fi
+
   if [ -f "$dir/.orc/logs/orchestrator.log" ]; then
     echo ""
     printf "  ${DIM}── Dernières lignes du log ──${NC}\n"
@@ -726,6 +958,136 @@ cmd_update() {
   else
     die "$ORC_DIR n'est pas un repo git."
   fi
+}
+
+# ============================================================
+# COMMANDE : chat
+# ============================================================
+
+cmd_chat() {
+  local name="${1:-}"
+  [ -z "$name" ] && die "Usage : orc chat <nom> [--prompt \"directive\"]"
+  require_project "$name"
+  shift || true
+
+  # Parse options
+  local user_prompt=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --prompt|-p)
+        user_prompt="${2:-}"
+        [ -z "$user_prompt" ] && die "--prompt nécessite un texte"
+        shift 2
+        ;;
+      *) die "Option inconnue : $1" ;;
+    esac
+  done
+
+  local dir
+  dir=$(project_dir "$name")
+
+  command -v claude &>/dev/null || die "Claude Code CLI non installé."
+
+  # Si --prompt : injecter dans human-notes et lancer en one-shot si le run tourne
+  if [ -n "$user_prompt" ]; then
+    local notes_file="$dir/.orc/human-notes.md"
+    {
+      [ -f "$notes_file" ] && [ -s "$notes_file" ] && echo ""
+      echo "## Directive humaine ($(date '+%Y-%m-%d %H:%M'))"
+      echo ""
+      echo "$user_prompt"
+    } >> "$notes_file"
+
+    printf "${GREEN}✓${NC} Directive injectée dans .orc/human-notes.md\n"
+    if is_running "$name"; then
+      printf "${DIM}  Le run est en cours — sera lu avant la prochaine feature.${NC}\n"
+    else
+      printf "${DIM}  Sera lu au prochain 'orc agent start %s'.${NC}\n" "$name"
+    fi
+    echo ""
+    return 0
+  fi
+
+  # Mode interactif : construire le contexte orc
+  local context=""
+
+  # Brief
+  if [ -f "$dir/.orc/BRIEF.md" ]; then
+    context="${context}
+## Brief produit
+$(cat "$dir/.orc/BRIEF.md")
+"
+  fi
+
+  # Roadmap + progression
+  if [ -f "$dir/.orc/ROADMAP.md" ]; then
+    local done_count todo_count
+    done_count=$(grep -c '^\- \[x\]' "$dir/.orc/ROADMAP.md" 2>/dev/null || true)
+    todo_count=$(grep -c '^\- \[ \]' "$dir/.orc/ROADMAP.md" 2>/dev/null || true)
+    context="${context}
+## Roadmap (${done_count:-0} faites / ${todo_count:-0} restantes)
+$(cat "$dir/.orc/ROADMAP.md")
+"
+  fi
+
+  # État du run
+  if [ -f "$dir/.orc/state.json" ] && command -v jq &>/dev/null; then
+    local cur_feat cur_phase feat_count run_status cost
+    cur_feat=$(jq -r '.current_feature // ""' "$dir/.orc/state.json" 2>/dev/null)
+    cur_phase=$(jq -r '.current_phase // ""' "$dir/.orc/state.json" 2>/dev/null)
+    feat_count=$(jq -r '.feature_count // 0' "$dir/.orc/state.json" 2>/dev/null)
+    run_status=$(jq -r '.run_status // ""' "$dir/.orc/state.json" 2>/dev/null)
+    cost=""
+    if [ -f "$dir/.orc/tokens.json" ]; then
+      cost=$(jq -r '.total_cost_usd // ""' "$dir/.orc/tokens.json" 2>/dev/null)
+    fi
+    context="${context}
+## État du run
+- Status : ${run_status:-inconnu}
+- Features complétées : ${feat_count}
+- Feature en cours : ${cur_feat:-aucune}
+- Phase : ${cur_phase:-inconnue}
+- Coût cumulé : \$${cost:-0}
+"
+  fi
+
+  # Human notes en cours
+  if [ -f "$dir/.orc/human-notes.md" ] && [ -s "$dir/.orc/human-notes.md" ]; then
+    context="${context}
+## Directives humaines en attente
+$(cat "$dir/.orc/human-notes.md")
+"
+  fi
+
+  # Action requise
+  if [ -f "$dir/.orc/action-required" ]; then
+    context="${context}
+## ACTION REQUISE
+$(cat "$dir/.orc/action-required")
+"
+  fi
+
+  # Dernières réflexions de fix
+  local latest_reflection
+  latest_reflection=$(ls -t "$dir/.orc/logs/fix-reflections-"*.md 2>/dev/null | head -1 || true)
+  if [ -n "$latest_reflection" ]; then
+    context="${context}
+## Dernières réflexions de fix
+$(cat "$latest_reflection")
+"
+  fi
+
+  local prompt_header="Tu es l'assistant du projet '${name}', orchestré par ORC.
+Tu as accès au code source et au CLAUDE.md du projet (chargés automatiquement).
+Voici le contexte additionnel de l'orchestrateur :
+${context}
+Aide l'utilisateur à comprendre l'état du projet, débugger des problèmes, ou prendre des décisions techniques.
+Si l'utilisateur veut injecter une directive pour le prochain run, écris-la dans .orc/human-notes.md."
+
+  printf "${BOLD}orc chat${NC} — %s\n" "$name"
+  printf "${DIM}Contexte : brief, roadmap, état du run, directives, réflexions.${NC}\n\n"
+
+  cd "$dir" && claude --append-system-prompt "$prompt_header"
 }
 
 # ============================================================
@@ -1335,6 +1697,7 @@ agent_dispatch() {
     logs)      cmd_logs "$@" ;;
     dashboard) cmd_dashboard "$@" ;;
     github)    cmd_github "$@" ;;
+    env)       cmd_env "$@" ;;
     update)    cmd_update ;;
     help|-h|--help) cmd_agent_help ;;
     *) die "Commande inconnue : agent $subcmd. Voir : orc agent help" ;;

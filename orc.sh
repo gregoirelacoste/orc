@@ -65,6 +65,8 @@ orc_help() {
   printf "    ${CYAN}orc agent new <nom> --brief x.md${NC}  Créer depuis un brief (+ clarification IA)\n"
   printf "    ${CYAN}orc agent new <nom> --github${NC}      Créer + repo GitHub (private par défaut)\n"
   printf "    ${CYAN}orc agent github <nom>${NC}            Créer le repo GitHub d'un projet existant\n"
+  printf "    ${CYAN}orc agent env <nom>${NC}              Configurer les variables d'environnement\n"
+  printf "    ${CYAN}orc chat <nom>${NC}                   Chat Claude avec contexte projet (brief, roadmap, état)\n"
   printf "    ${CYAN}orc agent start <nom>${NC}             Lancer en background\n"
   printf "    ${CYAN}orc agent stop <nom>${NC}              Arrêter proprement\n"
   printf "    ${CYAN}orc agent status${NC}                  Vue d'ensemble (avec progression)\n"
@@ -196,6 +198,10 @@ case "$COMMAND" in
   logs|l)
     source "$ORC_DIR/orc-agent.sh"
     cmd_logs "$@"
+    ;;
+  chat|c)
+    source "$ORC_DIR/orc-agent.sh"
+    cmd_chat "$@"
     ;;
   help|-h|--help)
     orc_help

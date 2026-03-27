@@ -111,7 +111,7 @@ cmd_new() {
   mkdir -p "$dir/.orc/logs"
   cp "$TEMPLATE_DIR/config.default.sh" "$dir/.orc/config.sh"
 
-  # Créer project/ avec son propre git
+  # Initialiser git dans le workspace
   [ -d "$dir/.git" ] || ( cd "$dir" && git init -b main > /dev/null 2>&1 )
 
   # Structure research/

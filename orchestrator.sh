@@ -8,8 +8,8 @@ set -euo pipefail
 # Usage :
 #   ./orchestrator.sh    — lance l'agent autonome (BRIEF.md requis)
 #
-# Ce script doit être lancé depuis un workspace créé par init.sh.
-# Il crée project/ (si pas déjà fait) et pilote Claude en boucle.
+# Ce script doit être lancé depuis un workspace créé par orc agent new.
+# Il pilote Claude en boucle pour développer les features de la roadmap.
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,6 +84,9 @@ cleanup() {
     RUN_STATUS="crashed"
     RUN_ENDED_AT=$(date -Iseconds)
     log ERROR "Run interrompu (crash ou signal)."
+    # Diagnostic : écrire les dernières lignes du log pour le status
+    write_action_required "Le run a crashé pendant la phase '${CURRENT_PHASE:-inconnue}'" \
+      "$(tail -20 "$LOG_DIR/orchestrator.log" 2>/dev/null | grep -v '^\[' | head -10)"
   fi
   # Sauvegarder l'état
   save_state
@@ -93,6 +96,35 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+# === ACTION REQUIRED ===
+
+# Écrit un fichier .orc/action-required lisible par orc status
+write_action_required() {
+  local title="$1"
+  local details="${2:-}"
+  local action_file="$SCRIPT_DIR/.orc/action-required"
+  {
+    echo "# Action requise"
+    echo ""
+    echo "**$title**"
+    echo ""
+    if [ -n "$details" ]; then
+      echo '```'
+      echo "$details"
+      echo '```'
+      echo ""
+    fi
+    echo "Feature : ${CURRENT_FEATURE:-inconnue}"
+    echo "Phase : ${CURRENT_PHASE:-inconnue}"
+    echo "Date : $(date '+%Y-%m-%d %H:%M:%S')"
+  } > "$action_file"
+}
+
+# Efface le fichier action-required (appelé au démarrage)
+clear_action_required() {
+  rm -f "$SCRIPT_DIR/.orc/action-required"
+}
 
 # === FONCTIONS UTILITAIRES ===
 
@@ -666,7 +698,7 @@ branch_name() {
 
 # Exécute une commande dans PROJECT_DIR sans changer le pwd global
 run_in_project() {
-  ( cd "$PROJECT_DIR" && eval "$@" )
+  ( set +e; cd "$PROJECT_DIR" && eval "$@" )
 }
 
 # === NOTIFICATIONS ===
@@ -1723,6 +1755,7 @@ init_tokens
 restore_state
 gh_restore_tracking_issue
 
+clear_action_required
 log PHASE "DÉMARRAGE DE L'AGENT AUTONOME"
 log INFO "Config : MAX_FEATURES=$MAX_FEATURES | MAX_FIX=$MAX_FIX_ATTEMPTS | EPIC_SIZE=$EPIC_SIZE"
 log INFO "Recherche : $ENABLE_RESEARCH | Approbation humaine : $REQUIRE_HUMAN_APPROVAL"
@@ -1919,7 +1952,27 @@ $(cat "$prev_feedback")"
     if [ $BUILD_EXIT -eq 0 ] && [ $TEST_EXIT -eq 0 ]; then
       tests_passed=true
       log INFO "Build + tests OK !"
+      clear_action_required
       break
+    fi
+
+    # Détecter les problèmes d'environnement (vars manquantes, services non configurés)
+    local combined_output="${BUILD_OUTPUT}${TEST_OUTPUT}"
+    if echo "$combined_output" | grep -qiE 'required.*env|env.*required|API.*key.*required|URL.*required|missing.*key|missing.*env|not configured|\.env'; then
+      local missing_vars env_errors proj_name_short
+      missing_vars=$(echo "$combined_output" | grep -oiE '[A-Z_]{3,}(URL|KEY|SECRET|TOKEN|ID)' | sort -u | head -5 || true)
+      env_errors=$(echo "$combined_output" | grep -iE 'required|missing|env|key|url|not configured' | head -5 || true)
+      proj_name_short=$(basename "$SCRIPT_DIR")
+      write_action_required "Variables d'environnement manquantes" \
+        "Le build ou les tests échouent car des variables d'environnement ne sont pas configurées.
+
+Variables probables : ${missing_vars:-voir erreur ci-dessous}
+
+${env_errors}
+
+Résoudre :
+  orc agent env ${proj_name_short}"
+      log WARN "Variables d'environnement manquantes détectées — voir 'orc status ${proj_name_short}'"
     fi
 
     attempt=$((attempt + 1))
@@ -2231,7 +2284,7 @@ Sois concret et actionnable.
 IMPROVE
 )" 30 "$LOG_DIR/orchestrator-improvements.log" "self-improve"
 
-log INFO "Suggestions d'amélioration : project/orchestrator-improvements.md"
+log INFO "Suggestions d'amélioration : orchestrator-improvements.md"
 
 # Extraire les learnings et les copier dans le template pour les futurs projets
 if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
@@ -2318,7 +2371,7 @@ log INFO "Features complétées : $FEATURE_COUNT"
 log INFO "Features en échec : $TOTAL_FAILURES"
 
 if [ -f "$PROJECT_DIR/DONE.md" ]; then
-  log INFO "Le projet est déclaré terminé. Voir project/DONE.md"
+  log INFO "Le projet est déclaré terminé. Voir DONE.md"
 else
   log WARN "L'orchestrateur s'est arrêté (limite MAX_FEATURES=$MAX_FEATURES atteinte)."
 fi
