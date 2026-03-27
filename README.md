@@ -224,10 +224,14 @@ L'agent améliore ses propres outils au fil du projet :
 │
 └── project/                 ← Le code produit (son propre repo git)
     ├── CLAUDE.md            ← Auto-généré et auto-amélioré
-    ├── ROADMAP.md           ← Auto-généré, évolue avec le projet
-    ├── codebase/            ← Carte sémantique du code
-    ├── research/            ← Veille marché
     ├── .claude/skills/      ← Skills de l'agent
+    ├── .orc/                ← Artéfacts orchestrateur (isolés du produit)
+    │   ├── BRIEF.md         ← Copie du brief
+    │   ├── ROADMAP.md       ← Roadmap features
+    │   ├── codebase/        ← Carte sémantique du code
+    │   ├── research/        ← Veille marché
+    │   └── logs/            ← Rétrospectives, feedback
+    ├── README.md            ← Doc produit
     └── src/                 ← Code applicatif
 ```
 

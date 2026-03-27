@@ -125,6 +125,12 @@ Quel que soit le mode, le workspace créé est identique :
 │   ├── logs/                ← Logs orchestrateur
 │   └── ...
 └── project/                 ← Code produit (git indépendant)
+    ├── CLAUDE.md            ← Guidelines IA (convention Claude Code)
+    ├── .claude/skills/      ← Skills agent (convention Claude Code)
+    ├── .orc/                ← Artéfacts orc (isolés du produit)
+    │   ├── BRIEF.md, ROADMAP.md, codebase/, research/, logs/
+    ├── README.md            ← Doc produit (clean)
+    └── src/                 ← Code applicatif
 ```
 
 ## Écrire un bon brief
