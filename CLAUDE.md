@@ -147,7 +147,7 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 `.orc/known-issues.md` : alimenté automatiquement quand un fix réussit après des échecs. Contient la réflexion qui a mené au fix. Injecté dans le prompt de fix des features suivantes pour ne pas répéter les mêmes erreurs.
 
 ### Review adversariale (critic) — multi-agent
-`phases/03b-critic.md` — 10 turns max, modèle **principal** (pas léger). Exécutée entre implement+lint et les tests. Utilise un `--system-prompt` adversarial ("reviewer senior sceptique") distinct du coder pour éliminer le biais de confirmation. Review le diff vs main, corrige max 3 bugs AVANT le cycle de test coûteux.
+`phases/03b-critic.md` — 10 turns max, modèle **principal** (pas léger). Exécutée entre implement+lint et les tests. Utilise un `--append-system-prompt` adversarial ("reviewer senior sceptique") distinct du coder pour éliminer le biais de confirmation. Review le diff vs main, corrige max 3 bugs AVANT le cycle de test coûteux.
 
 ### Apprentissage adaptatif des turns
 `adaptive_max_turns()` calcule le max_turns optimal par phase basé sur l'historique réel (p75 + 30% marge). Stocké dans `tokens.json` (`by_phase.X.turns_history[]`). Après 3+ invocations d'une phase, le max_turns est réduit automatiquement si la phase utilise moins que prévu. Le défaut reste comme plafond. Évite de réserver 50 turns pour une phase qui en utilise 12.
