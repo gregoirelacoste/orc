@@ -2065,12 +2065,17 @@ gh_restore_tracking_issue
 # avec les valeurs par défaut. Permet aux projets existants de bénéficier
 # des nouvelles options sans intervention humaine.
 migrate_config() {
+  # Résoudre la config projet (supporte .orc/config.sh et config.sh rétrocompat)
   local project_config="$SCRIPT_DIR/.orc/config.sh"
+  [ -f "$project_config" ] || project_config="$SCRIPT_DIR/config.sh"
   [ -f "$project_config" ] || return 0
+
+  # Vérifier que la config est writable
+  [ -w "$project_config" ] || { log WARN "Config non writable ($project_config) — migration ignorée."; return 0; }
 
   # Résoudre le chemin du template orc (via le symlink orchestrator.sh)
   local orc_dir
-  orc_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo "")
+  orc_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")
   local default_config="$orc_dir/config.default.sh"
   [ -f "$default_config" ] || return 0
 
@@ -2083,7 +2088,6 @@ migrate_config() {
     [[ "$line" =~ ^[[:space:]]*$ ]] && continue
     [[ "$line" =~ ^declare ]] && continue
     [[ "$line" =~ ^\) ]] && continue
-    [[ "$line" =~ ^\[\" ]] && continue
 
     # Extraire le nom de la variable
     local var_name="${line%%=*}"
@@ -2092,32 +2096,36 @@ migrate_config() {
 
     # Vérifier si le paramètre existe dans la config du projet
     if ! grep -q "^${var_name}=" "$project_config" 2>/dev/null; then
-      # Ajouter le paramètre manquant avec sa valeur par défaut
-      echo "" >> "$project_config"
-      echo "# [migré auto] Nouveau paramètre — voir config.default.sh pour la doc" >> "$project_config"
+      echo "# [migré auto]" >> "$project_config"
       echo "$line" >> "$project_config"
       migrated=$((migrated + 1))
-      log INFO "Config migrée : $var_name (ajouté avec la valeur par défaut)"
+      log INFO "Config migrée : $var_name"
     fi
   done < "$default_config"
 
   # Migrer PHASE_TIMEOUTS (declare -A, traitement spécial)
   if ! grep -q "PHASE_TIMEOUTS" "$project_config" 2>/dev/null; then
     if grep -q "declare -A PHASE_TIMEOUTS" "$default_config" 2>/dev/null; then
-      echo "" >> "$project_config"
-      echo "# [migré auto] Timeouts par phase — voir config.default.sh pour la doc" >> "$project_config"
+      echo "# [migré auto] Timeouts par phase" >> "$project_config"
       sed -n '/^declare -A PHASE_TIMEOUTS/,/^)/p' "$default_config" >> "$project_config"
       migrated=$((migrated + 1))
-      log INFO "Config migrée : PHASE_TIMEOUTS (ajouté avec les valeurs par défaut)"
+      log INFO "Config migrée : PHASE_TIMEOUTS"
     fi
   fi
 
   if [ "$migrated" -gt 0 ]; then
-    log INFO "Migration config : $migrated paramètres ajoutés. Re-source en cours..."
-    source "$project_config"
+    log INFO "Migration config : $migrated paramètres ajoutés."
   fi
 }
 migrate_config
+
+# Re-source la config au top-level après migration (declare -A PHASE_TIMEOUTS
+# crée un array local si sourcé dans une fonction — le re-source ici le rend global)
+if [ -f "$SCRIPT_DIR/.orc/config.sh" ]; then
+  source "$SCRIPT_DIR/.orc/config.sh"
+elif [ -f "$SCRIPT_DIR/config.sh" ]; then
+  source "$SCRIPT_DIR/config.sh"
+fi
 
 clear_action_required
 log PHASE "DÉMARRAGE DE L'AGENT AUTONOME"
