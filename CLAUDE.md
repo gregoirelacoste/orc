@@ -137,8 +137,14 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 
 ### Contrôle humain mid-run
 - `.orc/human-notes.md` : lu et injecté dans le prompt avant chaque feature
-- `.orc/pause-requested` / `.orc/stop-after-feature` : signaux file-based pour le mode nohup
+- `.orc/pause-requested` / `.orc/stop-after-feature` / `.orc/skip-feature` : signaux file-based pour le mode nohup
 - `.orc/logs/human-feedback-N.md` : feedback structuré, prioritaire sur les observations de l'IA
+
+### Mémoire inter-features (known-issues.md)
+`.orc/known-issues.md` : alimenté automatiquement quand un fix réussit après des échecs. Contient la réflexion qui a mené au fix. Injecté dans le prompt de fix des features suivantes pour ne pas répéter les mêmes erreurs.
+
+### Lint pré-tests
+Si `LINT_COMMAND` est défini, exécuté entre implement et la boucle test/fix. En cas d'échec, correction automatique par Claude (10 turns max) avant de lancer les tests.
 
 ### GitHub Integration (local-first, GitHub-augmented)
 **Principe** : local = source de vérité, GitHub = miroir de visibilité. Tout fonctionne sans GitHub. Chaque option est indépendante et off par défaut.
@@ -153,7 +159,7 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 - Fonctions préfixées `gh_*` dans `orchestrator.sh` — Phase 1 (PR/tracking), Phase 2 (roadmap sync/feedback), Phase 3 (CI/releases).
 
 ### Détection de boucle fix
-`error_hash()` compare les erreurs entre tentatives. Même erreur 2x → prompt "change d'approche". 3x → abandon anticipé.
+`error_hash()` extrait les lignes contenant `error/fail/exception`, supprime les numéros de ligne, trie et hashe. Compare la structure de l'erreur (pas sa position). Même erreur 2x → prompt "change d'approche". 3x → abandon anticipé.
 
 ### Quality gate
 `QUALITY_COMMAND` exécuté après tests, avant merge. Non-bloquant si échec après correction.

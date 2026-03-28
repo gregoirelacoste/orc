@@ -857,6 +857,14 @@ check_signals() {
     print_cost_summary
     exit 0
   fi
+
+  # Signal : skip la feature en cours
+  if [ -f "$signal_dir/skip-feature" ]; then
+    rm -f "$signal_dir/skip-feature"
+    log WARN "Signal skip-feature détecté — abandon de la feature en cours."
+    notify "Feature '${CURRENT_FEATURE:-inconnue}' skippée par signal humain."
+    SKIP_CURRENT_FEATURE=true
+  fi
 }
 
 # === GITHUB INTEGRATION ===
@@ -1526,7 +1534,16 @@ LAST_ERROR_HASH=""
 # Compare l'erreur courante avec la précédente pour détecter les boucles
 error_hash() {
   local output="$1"
-  echo "$output" | head -20 | md5sum | cut -d' ' -f1
+  # Extraire les lignes d'erreur, supprimer les numéros de ligne/timestamps
+  # pour comparer la structure de l'erreur, pas sa position exacte
+  local filtered
+  filtered=$(echo "$output" | grep -iE 'error|fail|exception|TypeError|SyntaxError|cannot find|not found|unexpected' | \
+    sed 's/[0-9]\+//g' | sort -u | head -10)
+  # Fallback sur head -20 si aucune ligne d'erreur trouvée
+  if [ -z "$filtered" ]; then
+    filtered=$(echo "$output" | head -20)
+  fi
+  echo "$filtered" | md5sum | cut -d' ' -f1
 }
 
 # === QUALITY GATE ===
@@ -1958,8 +1975,12 @@ if ! grep -q '^\- \[ \]' "$PROJECT_DIR/.orc/ROADMAP.md" 2>/dev/null; then
 fi
 
 # ============================================================
-# PHASE 3 — BOUCLE PRINCIPALE
+# PHASE 3 — BOUCLE PRINCIPALE (avec cycles evolve intégrés)
 # ============================================================
+
+# Boucle englobante : feature loop + evolve, sans exec "$0" restart
+MAIN_LOOP_CONTINUE=true
+while [ "$MAIN_LOOP_CONTINUE" = true ]; do
 
 log PHASE "PHASE 3 — BOUCLE DE DÉVELOPPEMENT"
 
@@ -1985,7 +2006,16 @@ while [ $FEATURE_COUNT -lt $MAX_FEATURES ]; do
   gh_comment "🚀 **Feature #$FEATURE_COUNT** : $feature_name — démarrage"
 
   # --- Vérifier les signaux humains ---
+  SKIP_CURRENT_FEATURE=false
   check_signals
+
+  # Skip demandé par signal humain → passer à la feature suivante
+  if [ "$SKIP_CURRENT_FEATURE" = true ]; then
+    log WARN "Feature '$feature_name' skippée par signal humain."
+    timeline_update_last "skipped" 0
+    run_in_project "git checkout main 2>/dev/null || true"
+    continue
+  fi
 
   # --- S'assurer qu'on est sur main avant de commencer ---
   run_in_project "git checkout main 2>/dev/null || true"
@@ -2042,6 +2072,26 @@ $(cat "$prev_feedback")"
   fi
 
   run_claude "$impl_prompt" "$MAX_TURNS_PER_INVOCATION" "$LOG_DIR/feature-$FEATURE_COUNT-impl.log" "implement" "$feature_name"
+
+  # --- Lint (rapide, avant les tests) ---
+  if [ -n "${LINT_COMMAND:-}" ]; then
+    log INFO "Lint en cours..."
+    LINT_OUTPUT=$(run_in_project "$LINT_COMMAND 2>&1") && LINT_EXIT=0 || LINT_EXIT=$?
+    if [ $LINT_EXIT -ne 0 ]; then
+      log WARN "Lint échoué — correction rapide avant les tests..."
+      run_claude "Le lint a échoué après l'implémentation de la feature '$feature_name'.
+
+COMMANDE : $LINT_COMMAND
+EXIT CODE : $LINT_EXIT
+OUTPUT :
+$(smart_truncate "$LINT_OUTPUT" 2000)
+
+Corrige les erreurs de lint. Ne change PAS la logique, uniquement le formatage/style." \
+        10 "$LOG_DIR/feature-$FEATURE_COUNT-lint.log" "fix" "$feature_name" || true
+    else
+      log INFO "Lint OK."
+    fi
+  fi
 
   # --- Test & Fix Loop (avec détection de boucle) ---
   update_phase_tracking "test-fix" "$feature_name"
@@ -2102,29 +2152,20 @@ Résoudre :
         break
       fi
 
-      # Réflexion structurée (pattern Reflexion) : l'IA écrit ce qu'elle a tenté et pourquoi ça a échoué
+      # Construire le prompt de fix avec réflexion intégrée (1 invocation au lieu de 2)
       reflection_file="$PROJECT_DIR/.orc/logs/fix-reflections-$FEATURE_COUNT.md"
-      run_claude "Tu viens d'essayer de corriger la feature '$feature_name' (tentative $attempt/$MAX_FIX_ATTEMPTS) et ça a échoué.
-
-BUILD (exit $BUILD_EXIT):
-$(smart_truncate "$BUILD_OUTPUT" 1500)
-
-TESTS (exit $TEST_EXIT):
-$(smart_truncate "$TEST_OUTPUT" 1500)
-
-Écris une RÉFLEXION STRUCTURÉE (3-5 lignes max) dans ce format :
-- **Ce que j'ai tenté :** [description de l'approche]
-- **Pourquoi ça a échoué :** [cause racine identifiée]
-- **Ce que je dois essayer :** [nouvelle approche concrète]
-
-Écris cette réflexion dans le fichier .orc/logs/fix-reflections-$FEATURE_COUNT.md (append).
-Ne modifie PAS le code dans cette étape — uniquement la réflexion." \
-        5 "$LOG_DIR/feature-$FEATURE_COUNT-reflection-$attempt.log" "reflection" "$feature_name" || true
-
-      # Construire le prompt de fix avec les réflexions passées
       fix_prompt=$(write_fix_prompt "$attempt" "$MAX_FIX_ATTEMPTS" \
         "$BUILD_EXIT" "$(smart_truncate "$BUILD_OUTPUT" 3000)" \
         "$TEST_EXIT" "$(smart_truncate "$TEST_OUTPUT" 3000)")
+
+      # Réflexion structurée intégrée au fix (pattern Reflexion sans invocation séparée)
+      fix_prompt="$fix_prompt
+
+AVANT DE CODER, écris une RÉFLEXION STRUCTURÉE (3-5 lignes) dans .orc/logs/fix-reflections-$FEATURE_COUNT.md (append) :
+- **Ce que j'ai tenté :** [description de l'approche]
+- **Pourquoi ça a échoué :** [cause racine identifiée]
+- **Ce que je vais essayer :** [nouvelle approche concrète]
+Puis applique la correction."
 
       # Injecter les réflexions passées
       if [ -f "$reflection_file" ]; then
@@ -2132,6 +2173,15 @@ Ne modifie PAS le code dans cette étape — uniquement la réflexion." \
 
 RÉFLEXIONS DES TENTATIVES PRÉCÉDENTES (en tenir compte pour ne PAS refaire les mêmes erreurs) :
 $(cat "$reflection_file")"
+      fi
+
+      # Injecter les problèmes connus inter-features
+      local known_issues="$PROJECT_DIR/.orc/known-issues.md"
+      if [ -f "$known_issues" ]; then
+        fix_prompt="$fix_prompt
+
+PROBLÈMES DÉJÀ RÉSOLUS SUR CE PROJET (solutions connues) :
+$(cat "$known_issues")"
       fi
 
       if [ "$same_error_count" -eq 1 ]; then
@@ -2161,6 +2211,21 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
     gh_create_abandoned_issue "$feature_name" "$attempt"
     # Retour sur main pour ne pas polluer la feature suivante
     run_in_project "git checkout main 2>/dev/null || true"
+  elif [ "$attempt" -gt 0 ]; then
+    # Fix réussi après des échecs → mémoriser dans known-issues.md pour les futures features
+    local known_issues="$PROJECT_DIR/.orc/known-issues.md"
+    local reflection_file="$PROJECT_DIR/.orc/logs/fix-reflections-$FEATURE_COUNT.md"
+    if [ -f "$reflection_file" ]; then
+      {
+        echo ""
+        echo "### Feature #$FEATURE_COUNT: $feature_name (résolu en $attempt tentatives)"
+        echo ""
+        # Extraire la dernière réflexion (celle qui a mené au fix)
+        tail -5 "$reflection_file"
+        echo ""
+      } >> "$known_issues"
+      log INFO "Problème résolu mémorisé dans known-issues.md"
+    fi
   fi
 
   # --- Reflect & Evolve ---
@@ -2302,6 +2367,7 @@ if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
   if [ "$max_evolve" -gt 0 ] && [ "$EVOLVE_CYCLES" -gt "$max_evolve" ]; then
     log WARN "Limite de cycles evolve atteinte ($EVOLVE_CYCLES/$max_evolve) — arrêt."
     notify "Limite de cycles evolve atteinte ($max_evolve). Projet terminé automatiquement."
+    MAIN_LOOP_CONTINUE=false
   else
     log PHASE "PHASE FINALE — ÉVOLUTION (cycle $EVOLVE_CYCLES)"
     evolve_prompt=$(render_phase "07-evolve.md")
@@ -2324,10 +2390,16 @@ if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
 
       log INFO "Nouvelles features ajoutées — relancement de la boucle."
       save_state
-      exec "$0"
+      # Relancer la boucle englobante au lieu de exec "$0"
+    else
+      MAIN_LOOP_CONTINUE=false
     fi
   fi
+else
+  MAIN_LOOP_CONTINUE=false
 fi
+
+done  # fin MAIN_LOOP (while MAIN_LOOP_CONTINUE)
 
 # ============================================================
 # PHASE POST-PROJET — AUTO-AMÉLIORATION DE L'ORCHESTRATEUR
