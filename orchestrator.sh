@@ -137,8 +137,8 @@ get_model_pricing() {
 
 # Phases légères qui utilisent CLAUDE_MODEL_LIGHT si disponible
 # Phases non-code : pas besoin du modèle principal (text, recherche web, décision)
-# Phases légères (modèle léger). Le critic utilise le modèle PRINCIPAL (review de qualité)
-LIGHT_PHASES="plan reflection reflect self-improve meta-retro quality strategy research-initial research-epic evolve"
+# Phases légères (modèle léger). Critic + tech-debt utilisent le modèle PRINCIPAL
+LIGHT_PHASES="plan acceptance reflection reflect self-improve meta-retro quality strategy research-initial research-epic evolve"
 
 # Résoudre le modèle effectif pour une phase donnée
 # Usage: resolve_model "reflection" → affiche le modèle à utiliser
@@ -2683,9 +2683,12 @@ Exemples de problèmes : performance dégradée, bundle trop gros, couverture in
     local acceptance_prompt
     acceptance_prompt=$(render_phase "04b-acceptance.md" \
       "EPIC_NUMBER=$epic_number" \
-      "FEATURE_COUNT=$FEATURE_COUNT" \
-      "DEV_COMMAND=${DEV_COMMAND:-npm run dev}")
-    run_claude "$acceptance_prompt" 15 "$LOG_DIR/acceptance-epic-$epic_number.log" "acceptance" "epic-$epic_number" || {
+      "FEATURE_COUNT=$FEATURE_COUNT")
+    # DEV_COMMAND ajouté en fin de prompt (pas render_phase, car peut contenir / ou \)
+    acceptance_prompt="$acceptance_prompt
+
+COMMANDE DEV SERVER : ${DEV_COMMAND:-npm run dev}"
+    run_claude "$acceptance_prompt" 20 "$LOG_DIR/acceptance-epic-$epic_number.log" "acceptance" "epic-$epic_number" || {
       log WARN "Acceptance échouée — on continue."
     }
 
@@ -2911,29 +2914,33 @@ if [ -n "${FUNCTIONAL_CHECK_COMMAND:-}" ]; then
   save_state
 fi
 
-# Déploiement automatique si configuré et app fonctionnelle
-if [ -n "${DEPLOY_COMMAND:-}" ] && [ "${LAST_FUNCTIONAL_CHECK:-}" != "false" ]; then
-  log PHASE "DÉPLOIEMENT"
-  log INFO "Commande : $DEPLOY_COMMAND"
-  deploy_output=$(run_in_project "$DEPLOY_COMMAND 2>&1") && deploy_exit=0 || deploy_exit=$?
-  if [ $deploy_exit -eq 0 ]; then
-    log INFO "Déploiement réussi ✓"
-    notify "Déploiement réussi ! Projet $PROJECT_NAME déployé."
-  else
-    log ERROR "Déploiement échoué (exit $deploy_exit)"
-    log ERROR "Output : $(smart_truncate "$deploy_output" 1000)"
-    notify "Déploiement échoué pour $PROJECT_NAME."
-  fi
-elif [ -n "${DEPLOY_COMMAND:-}" ] && [ "${LAST_FUNCTIONAL_CHECK:-}" = "false" ]; then
-  log WARN "Déploiement ignoré — app non fonctionnelle."
-fi
-
 workflow_transition "done"
 CURRENT_PHASE="done"
 CURRENT_FEATURE=""
 RUN_STATUS="completed"
 RUN_ENDED_AT=$(date -Iseconds)
 save_state
+
+# Déploiement automatique si configuré (post-completion, ne bloque pas le statut "done")
+if [ -n "${DEPLOY_COMMAND:-}" ]; then
+  if [ "${LAST_FUNCTIONAL_CHECK:-null}" = "true" ]; then
+    log PHASE "DÉPLOIEMENT"
+    log INFO "Commande : $DEPLOY_COMMAND"
+    deploy_output=$(run_in_project "$DEPLOY_COMMAND 2>&1") && deploy_exit=0 || deploy_exit=$?
+    if [ $deploy_exit -eq 0 ]; then
+      log INFO "Déploiement réussi ✓"
+      notify "Déploiement réussi ! Projet $PROJECT_NAME déployé."
+    else
+      log ERROR "Déploiement échoué (exit $deploy_exit)"
+      log ERROR "Output : $(smart_truncate "$deploy_output" 1000)"
+      notify "Déploiement échoué pour $PROJECT_NAME."
+    fi
+  elif [ "${LAST_FUNCTIONAL_CHECK:-null}" = "false" ]; then
+    log WARN "Déploiement ignoré — app non fonctionnelle."
+  else
+    log INFO "Déploiement ignoré — aucune vérification fonctionnelle configurée."
+  fi
+fi
 
 log PHASE "TERMINÉ"
 log INFO "Features complétées : $FEATURE_COUNT"

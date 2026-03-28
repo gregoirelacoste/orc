@@ -38,6 +38,7 @@ Migration auto : migrate_config() ajoute les paramètres manquants au démarrage
 - `DEV_COMMAND="npm run dev"` — commande serveur dev
 - `LINT_COMMAND="npm run lint"` — commande lint (vide = désactivé)
 - `QUALITY_COMMAND=""` — quality gate post-tests
+- `DEPLOY_COMMAND=""` — commande de déploiement en fin de projet (ex: `scripts/deploy.sh`, `vercel deploy --prod`)
 - `FUNCTIONAL_CHECK_COMMAND=""` — vérification fonctionnelle post-feature
 
 ## Modèles

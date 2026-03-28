@@ -64,6 +64,7 @@ Chaque projet a sa propre configuration dans `~/projects/<nom>/.orc/config.sh`. 
 | `DEV_COMMAND` | `npm run dev` | Commande dev server |
 | `LINT_COMMAND` | `npm run lint` | Commande lint (vide = désactivé) |
 | `QUALITY_COMMAND` | *(vide)* | Commande qualité (après tests, avant merge) |
+| `DEPLOY_COMMAND` | *(vide)* | Commande de déploiement en fin de projet |
 | `FUNCTIONAL_CHECK_COMMAND` | *(vide)* | Vérification fonctionnelle post-feature |
 
 ### Modèles

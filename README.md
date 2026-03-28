@@ -88,6 +88,7 @@ Les paramètres clés :
 | `PAUSE_EVERY_N_FEATURES` | 0 | Pause toutes les N features (0 = jamais) |
 | `BUILD_COMMAND` | `npm run build` | Commande de build |
 | `TEST_COMMAND` | `npx playwright test` | Commande de test |
+| `DEPLOY_COMMAND` | *(vide)* | Déploiement auto en fin de projet |
 | `CLAUDE_MODEL` | *(défaut CLI)* | Modèle principal (implement, fix, critic) |
 | `CLAUDE_MODEL_LIGHT` | `claude-haiku-4-5` | Modèle léger (plan, reflect, research) |
 | `STALL_KILL_THRESHOLD` | 60 | Checks sans données avant kill auto (x5s) |
@@ -200,6 +201,8 @@ BOOTSTRAP ──▶ RECHERCHE INITIALE ──▶ STRATÉGIE & ROADMAP
                                     │ Lint             │
                                     │ Critic (review)  │
                                     │ Tests & Fix      │
+                                    │ Acceptance (epic) │
+                                    │ Tech-Debt (>30%) │
                                     │ Reflect          │
                                     └──────┬───────────┘
                                            │

@@ -84,3 +84,6 @@ Trap EXIT/INT/TERM : kill Claude, save state, workflow_transition("crashed") si 
 
 ### run_functional_check(feature_name)
 Exécute FUNCTIONAL_CHECK_COMMAND après chaque merge. Cycle de fix dédié si échec.
+
+### update_changelog()
+Met à jour le changelog du projet en fin de run. Génère un résumé des features implémentées, des métriques (coût, durée, taux de réussite) et du score de maturité.

@@ -10,7 +10,7 @@ L'epic est terminé. Vérifie que le produit fait ce que le BRIEF demande.
    - Le scénario fonctionne-t-il de bout en bout ?
 
 4. Si possible, lance l'application et teste manuellement :
-   - `{{DEV_COMMAND}}` pour démarrer
+   - Utilise la COMMANDE DEV SERVER fournie ci-dessous pour démarrer
    - Navigue les scénarios utilisateur clés
    - Vérifie que les données s'affichent / se sauvegardent
 

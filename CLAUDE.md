@@ -218,6 +218,21 @@ Le workspace est un repo git unique. `orchestrator.sh` et `phases/` sont des sym
 ### Réflexions structurées (pattern Reflexion)
 Après chaque échec de fix, l'IA écrit une réflexion structurée dans `.orc/logs/fix-reflections-N.md` (intégrée au prompt de fix, pas d'invocation séparée). Les réflexions sont injectées dans les tentatives suivantes.
 
+### Phase acceptance (validation epic)
+`phases/04b-acceptance.md` — exécutée après chaque epic (toutes les `EPIC_SIZE` features). Valide les user stories du BRIEF de bout en bout : lance l'app, teste les scénarios utilisateur, écrit un rapport `acceptance-N.md` avec score X/Y scénarios passés. Corrige max 5 problèmes critiques directement. Les problèmes non critiques vont en backlog.
+
+### Brief scoring (MVP-first)
+La phase strategy (`02-strategy.md`) score le brief sur 5 critères (clarté, scope, stack, succès, users) — note /25. Si score < 15/25, ajoute des hypothèses pour combler les manques. La roadmap est structurée en 2 phases : MVP (5-8 features max) + Améliorations (optionnel). Max 15 features totales. Le MVP doit être fonctionnel seul.
+
+### Phase tech-debt (refactoring auto)
+`phases/06b-tech-debt.md` — déclenchée quand >30% des features ont échoué (seuil de dette technique). Diagnostic : fichiers trop gros (>300 lignes), duplication, imports circulaires, tests fragiles, code mort, patterns incohérents. Max 5 refactorings, tous les tests doivent passer. Ne change pas le comportement visible. Met à jour `codebase/*.md` après le refactoring.
+
+### Déploiement auto (DEPLOY_COMMAND)
+`DEPLOY_COMMAND` dans config (vide par défaut). Exécuté en fin de projet si le run est complet et l'app fonctionnelle. Exemples : `scripts/deploy.sh`, `vercel deploy --prod`. Complète la chaîne : build → test → quality → functional check → deploy.
+
+### Score de maturité produit
+La phase evolve (`07-evolve.md`) évalue 6 critères /30 : parcours utilisateur complet, CRUD fonctionnel, gestion d'erreurs, UX cohérente, couverture de tests, documentation. Score >= 24/30 → DONE (projet terminé). Score >= 18 → 3 features ciblées. Score < 18 → corrections prioritaires. Remplace le critère arbitraire MAX_FEATURES comme signal d'arrêt intelligent.
+
 ## Roadmap
 
 Les items de roadmap sont des fichiers `.md` individuels dans `roadmap/`.

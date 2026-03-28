@@ -39,7 +39,12 @@ BOOTSTRAP ──▶ RECHERCHE INITIALE ──▶ STRATÉGIE & ROADMAP
             │                                      │   │
             │       ┌──────────────────────────────┘   │
             │       ▼                                   │
-            │   Reflect & Evolve                        │
+            │   Reflect                                 │
+            │       │                                   │
+            │       ├── (fin d'epic) → Acceptance       │
+            │       ├── (>30% échecs) → Tech-Debt       │
+            │       ▼                                   │
+            │   Evolve (score maturité /30)             │
             │   - met à jour CLAUDE.md                  │
             │   - crée/améliore des skills              │
             │   - coche la feature, note les leçons     │
@@ -66,9 +71,10 @@ BOOTSTRAP ──▶ RECHERCHE INITIALE ──▶ STRATÉGIE & ROADMAP
                             ...
                             │
                             ▼
-                    ROADMAP vide ?
-                    ├── non → nouvelles features proposées → boucle
-                    └── oui → DONE.md → fin
+                    Score maturité /30 ?
+                    ├── >= 24 → DONE.md → deploy (si DEPLOY_COMMAND) → fin
+                    ├── >= 18 → 3 features ciblées → boucle
+                    └── < 18  → corrections prioritaires → boucle
 ```
 
 ---
@@ -149,11 +155,12 @@ research/
 **Quand :** Après la recherche initiale, puis à chaque méta-rétro.
 
 **Ce que Claude fait :**
-1. Croise `BRIEF.md` (vision immuable) avec `research/INDEX.md` (données marché)
-2. Structure `ROADMAP.md` en epics de 3-5 features liées
-3. Chaque feature référence un insight de la recherche
-4. Ordonne par : impact utilisateur × faisabilité
-5. Quick wins en premier
+1. **Score le brief** sur 5 critères (clarté, scope, stack, succès, users) — note /25. Si < 15/25, ajoute des hypothèses pour combler les manques
+2. Croise `BRIEF.md` (vision immuable) avec `research/INDEX.md` (données marché)
+3. Structure `ROADMAP.md` en 2 phases : **MVP** (5-8 features) + **Améliorations** (optionnel, max 15 features totales)
+4. Chaque feature référence un insight de la recherche
+5. Ordonne par : impact utilisateur × faisabilité
+6. Quick wins en premier, MVP fonctionnel seul
 
 **Format ROADMAP.md :**
 ```markdown
@@ -227,7 +234,17 @@ Si attempt == MAX_FIX:
     Feature marquée en échec, on passe à la suite
 ```
 
-### 3g. Reflect & Evolve (auto-amélioration)
+### 3g. Acceptance (fin d'epic)
+
+`phases/04b-acceptance.md` — exécutée après chaque epic (toutes les `EPIC_SIZE` features).
+Valide les user stories du BRIEF de bout en bout :
+1. Lit le BRIEF et les features cochées de l'epic
+2. Lance l'app (`DEV_COMMAND`) et teste les scénarios utilisateur
+3. Écrit un rapport `acceptance-N.md` avec score X/Y scénarios passés
+4. Corrige max 5 problèmes critiques directement (pas de nouvelles features)
+5. Les problèmes non critiques vont en backlog
+
+### 3h. Reflect & Evolve (auto-amélioration)
 
 Après chaque feature, Claude enrichit sa connaissance du projet :
 
@@ -264,10 +281,13 @@ Après chaque feature, Claude enrichit sa connaissance du projet :
 
 ## Phase 5 — ÉVOLUTION (quand la roadmap est vide)
 
-Claude analyse le projet terminé et :
-1. Propose de nouvelles features basées sur la veille récente
-2. Identifie des optimisations ou refactorings
-3. Ou déclare le projet terminé → crée `DONE.md` avec bilan final
+Claude évalue le projet avec un **score de maturité /30** sur 6 critères :
+parcours utilisateur complet, CRUD fonctionnel, gestion d'erreurs, UX cohérente,
+couverture de tests, documentation.
+
+1. **Score >= 24/30** → projet terminé → crée `DONE.md` → déploiement auto si `DEPLOY_COMMAND` configuré
+2. **Score >= 18/30** → ajoute 3 features ciblées sur les faiblesses → relance la boucle
+3. **Score < 18/30** → corrections prioritaires sur les critères les plus faibles
 
 Le cycle evolve utilise une boucle `while` interne (pas `exec "$0"`) pour
 relancer la boucle feature sans redémarrer le process. Le compteur `evolve_cycle`
@@ -344,6 +364,7 @@ MAX_TURNS_RESEARCH_TREND=30     # Budget veille tendances
 # === TECHNIQUE ===
 LINT_COMMAND="npm run lint"     # Lint entre implement et critic (vide = désactivé)
 QUALITY_COMMAND=""              # Quality gate post-tests (ex: lighthouse, bundle-size)
+DEPLOY_COMMAND=""               # Déploiement auto en fin de projet (ex: scripts/deploy.sh, vercel deploy --prod)
 FUNCTIONAL_CHECK_COMMAND=""     # Vérification fonctionnelle post-merge
 
 # === TIMEOUTS ===

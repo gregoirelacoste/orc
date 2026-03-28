@@ -16,7 +16,8 @@
 
 ## Phase 02 — Strategy (phases/02-strategy.md)
 - Placeholders : aucun
-- Crée : ROADMAP.md structuré en epics
+- Crée : ROADMAP.md structuré en epics (MVP 5-8 features + améliorations optionnelles, max 15 total)
+- Brief scoring : 5 critères (clarté, scope, stack, succès, users) /25. Si < 15, ajoute des hypothèses
 - Guard : skip si ROADMAP a des items non cochés
 - Modèle : léger
 
@@ -50,6 +51,14 @@
 - Réflexion structurée intégrée au prompt de fix (pas d'invocation séparée)
 - known-issues.md injecté pour mémoire inter-features
 
+## Phase 04b — Acceptance (phases/04b-acceptance.md)
+- Placeholders : {{EPIC_NUMBER}}, {{FEATURE_COUNT}}, {{DEV_COMMAND}}
+- Déclenchée : après chaque epic (toutes les EPIC_SIZE features)
+- Valide les user stories du BRIEF de bout en bout
+- Écrit : .orc/logs/acceptance-N.md (score X/Y scénarios passés)
+- Corrige max 5 problèmes critiques directement
+- Modèle : principal
+
 ## Phase 05 — Reflect (phases/05-reflect.md)
 - Placeholders : {{FEATURE_NAME}}, {{TESTS_PASSED}}, {{FIX_ATTEMPTS}}, {{N}}
 - Met à jour : codebase/*.md, INDEX.md, stack-conventions.md, CLAUDE.md, skills, ROADMAP.md
@@ -62,9 +71,19 @@
 - Inclut : WebSearch veille, repriorisation, nettoyage, audit codebase/
 - Modèle : léger
 
+## Phase 06b — Tech-Debt (phases/06b-tech-debt.md)
+- Placeholders : {{FEATURE_COUNT}}, {{TOTAL_FAILURES}}
+- Déclenchée : quand >30% des features ont échoué (seuil de dette)
+- Diagnostic : fichiers trop gros, duplication, imports circulaires, tests fragiles, code mort
+- Max 5 refactorings, tous les tests doivent passer
+- Met à jour : codebase/*.md après refactoring
+- Modèle : principal
+
 ## Phase 07 — Evolve (phases/07-evolve.md)
 - Placeholders : aucun
 - Garde-fous : MAX_EVOLVE_CYCLES, MAX_AI_ROADMAP_ADDS, alignement BRIEF
+- Score de maturité : 6 critères /30 (parcours user, CRUD, erreurs, UX, tests, doc)
+- Score >= 24 → DONE, >= 18 → 3 features ciblées, < 18 → corrections prioritaires
 - Option A : ajoute features → relance boucle (while loop interne)
 - Option B : crée DONE.md → fin
 - Modèle : léger
