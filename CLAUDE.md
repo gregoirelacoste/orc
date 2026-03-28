@@ -117,6 +117,18 @@ Skills Claude Code disponibles pour travailler sur orc lui-même :
 ### run_claude()
 Point central — lance Claude en background, monitore le heartbeat, détecte les stalls, enforce le timeout, track les tokens. Toute modification ici impacte tout le système.
 
+### Modèle adaptatif par phase
+`CLAUDE_MODEL` = modèle principal (implement, strategy, fix, bootstrap, research). `CLAUDE_MODEL_LIGHT` = modèle léger pour phases simples (reflection, reflect, self-improve, meta-retro, quality). `resolve_model()` choisit le modèle selon la phase. Si `CLAUDE_MODEL_LIGHT` est vide, toutes les phases utilisent `CLAUDE_MODEL`.
+
+### Pricing dynamique
+`MODEL_PRICING` (associative array) contient les tarifs par préfixe de modèle. `get_model_pricing()` résout le coût input/output pour le modèle effectif. Fallback sur tarif Sonnet si modèle inconnu.
+
+### Budget prédictif
+Avant chaque invocation, `run_claude()` estime le coût probable (~4000 tokens input + ~2000 output par turn) et refuse de lancer si le budget restant serait dépassé. Complète le check post-hoc existant.
+
+### Stall kill auto
+`STALL_KILL_THRESHOLD` (config, défaut 60 = 5min) : kill automatique si Claude ne produit aucune donnée pendant ce seuil. Complète le warning à 2min et le timeout global.
+
 ### render_phase()
 Substitue `{{VAR}}` dans les prompts. Attention : la substitution bash `${content//pattern/replacement}` casse si `replacement` contient `/` ou `\`. Pour les outputs build/test, utiliser `write_fix_prompt()` à la place.
 

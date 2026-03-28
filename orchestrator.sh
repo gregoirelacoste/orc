@@ -59,9 +59,45 @@ TOTAL_INPUT_TOKENS=0
 TOTAL_OUTPUT_TOKENS=0
 TOTAL_COST_USD=0
 
-# Coût par token (Claude Opus 4, en USD) — ajuster selon le modèle
-COST_PER_INPUT_TOKEN=0.000015
-COST_PER_OUTPUT_TOKEN=0.000075
+# Pricing dynamique par modèle (USD par token)
+# Clé = préfixe du modèle, valeur = "input_cost:output_cost"
+declare -A MODEL_PRICING=(
+  ["claude-opus-4"]="0.000015:0.000075"
+  ["claude-sonnet-4"]="0.000003:0.000015"
+  ["claude-haiku-4"]="0.0000008:0.000004"
+)
+# Fallback si modèle inconnu (tarif Sonnet = raisonnable par défaut)
+DEFAULT_COST_PER_INPUT_TOKEN=0.000003
+DEFAULT_COST_PER_OUTPUT_TOKEN=0.000015
+
+# Résoudre le pricing pour un modèle donné
+# Usage: get_model_pricing "claude-sonnet-4-6-20250514" → set COST_PER_INPUT_TOKEN et COST_PER_OUTPUT_TOKEN
+get_model_pricing() {
+  local model="${1:-}"
+  COST_PER_INPUT_TOKEN="$DEFAULT_COST_PER_INPUT_TOKEN"
+  COST_PER_OUTPUT_TOKEN="$DEFAULT_COST_PER_OUTPUT_TOKEN"
+  for prefix in "${!MODEL_PRICING[@]}"; do
+    if [[ "$model" == "$prefix"* ]]; then
+      COST_PER_INPUT_TOKEN="${MODEL_PRICING[$prefix]%%:*}"
+      COST_PER_OUTPUT_TOKEN="${MODEL_PRICING[$prefix]##*:}"
+      return 0
+    fi
+  done
+}
+
+# Phases légères qui utilisent CLAUDE_MODEL_LIGHT si disponible
+LIGHT_PHASES="reflection reflect self-improve meta-retro quality"
+
+# Résoudre le modèle effectif pour une phase donnée
+# Usage: resolve_model "reflection" → affiche le modèle à utiliser
+resolve_model() {
+  local phase="$1"
+  if [ -n "${CLAUDE_MODEL_LIGHT:-}" ] && [[ " $LIGHT_PHASES " == *" $phase "* ]]; then
+    echo "$CLAUDE_MODEL_LIGHT"
+  else
+    echo "${CLAUDE_MODEL:-}"
+  fi
+}
 
 # === LOCKFILE ===
 LOCKFILE="$SCRIPT_DIR/.orc/.lock"
@@ -500,12 +536,33 @@ ${context_hint}
 
 $prompt"
 
-  # Lancer Claude en background avec output stream-JSON (JSONL)
-  # stream-json produit des événements au fil de l'eau → le watchdog
-  # peut détecter les vrais stalls (contrairement à json qui bufferise tout)
+  # Résoudre le modèle selon la phase (principal ou léger)
+  local effective_model
+  effective_model=$(resolve_model "$phase_name")
   local model_flag=""
-  if [ -n "${CLAUDE_MODEL:-}" ]; then
-    model_flag="--model $CLAUDE_MODEL"
+  if [ -n "$effective_model" ]; then
+    model_flag="--model $effective_model"
+    log INFO "  Modèle: $effective_model [phase=$phase_name]"
+  fi
+
+  # Résoudre le pricing pour le tracking
+  get_model_pricing "$effective_model"
+
+  # Budget prédictif : estimer le coût avant de lancer et refuser si ça dépasse
+  if [ -n "${MAX_BUDGET_USD:-}" ]; then
+    # Estimation conservatrice : ~4000 tokens input + ~2000 output par turn
+    local est_input=$(( max_turns * 4000 ))
+    local est_output=$(( max_turns * 2000 ))
+    local est_cost
+    est_cost=$(awk "BEGIN {printf \"%.2f\", $est_input * $COST_PER_INPUT_TOKEN + $est_output * $COST_PER_OUTPUT_TOKEN}")
+    local remaining
+    remaining=$(awk "BEGIN {printf \"%.2f\", $MAX_BUDGET_USD - $TOTAL_COST_USD}")
+    local would_exceed
+    would_exceed=$(awk "BEGIN {print ($TOTAL_COST_USD + $est_cost > $MAX_BUDGET_USD) ? \"yes\" : \"no\"}")
+    if [ "$would_exceed" = "yes" ]; then
+      log WARN "Budget prédictif : ~\$${est_cost} estimé, \$${remaining} restant — skip phase '$phase_name'"
+      return 1
+    fi
   fi
 
   # shellcheck disable=SC2086
@@ -550,6 +607,18 @@ $prompt"
     # Si bloqué depuis 2 minutes (24 x 5s), log un warning
     if [ "$stall_count" -eq 24 ]; then
       log WARN "Claude semble bloqué (pas de nouvelles données depuis 2min) [phase=$phase_name]"
+    fi
+
+    # Kill auto si stall prolongé (STALL_KILL_THRESHOLD × 5s)
+    local stall_kill="${STALL_KILL_THRESHOLD:-0}"
+    if [ "$stall_kill" -gt 0 ] && [ "$stall_count" -ge "$stall_kill" ]; then
+      local stall_mins=$(( stall_count * 5 / 60 ))
+      log ERROR "Claude bloqué depuis ${stall_mins}min — kill auto [phase=$phase_name]"
+      kill "$CLAUDE_PID" 2>/dev/null || true
+      wait "$CLAUDE_PID" 2>/dev/null || true
+      exit_code=124
+      CLAUDE_PID=""
+      break
     fi
 
     # Timeout global : kill si dépassé
