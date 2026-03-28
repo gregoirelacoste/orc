@@ -137,7 +137,8 @@ get_model_pricing() {
 
 # Phases légères qui utilisent CLAUDE_MODEL_LIGHT si disponible
 # Phases non-code : pas besoin du modèle principal (text, recherche web, décision)
-LIGHT_PHASES="plan critic reflection reflect self-improve meta-retro quality strategy research-initial research-epic evolve"
+# Phases légères (modèle léger). Le critic utilise le modèle PRINCIPAL (review de qualité)
+LIGHT_PHASES="plan reflection reflect self-improve meta-retro quality strategy research-initial research-epic evolve"
 
 # Résoudre le modèle effectif pour une phase donnée
 # Usage: resolve_model "reflection" → affiche le modèle à utiliser
@@ -212,6 +213,51 @@ write_action_required() {
 # Efface le fichier action-required (appelé au démarrage)
 clear_action_required() {
   rm -f "$SCRIPT_DIR/.orc/action-required"
+}
+
+# Apprentissage adaptatif : calcule un max_turns optimal basé sur l'historique
+# Utilise le p75 des turns passés + 30% de marge, avec un minimum plancher
+# Usage: adaptive_max_turns "implement" 50  → affiche le max_turns recommandé
+adaptive_max_turns() {
+  local phase="$1"
+  local default_max="$2"
+
+  # Besoin de jq et du fichier tokens
+  if ! command -v jq &>/dev/null || [ ! -f "$TOKENS_FILE" ]; then
+    echo "$default_max"
+    return
+  fi
+
+  # Extraire l'historique des turns pour cette phase
+  local turns_json
+  turns_json=$(jq -r ".by_phase[\"$phase\"].turns_history // []" "$TOKENS_FILE" 2>/dev/null)
+
+  # Besoin d'au moins 3 échantillons pour adapter
+  local count
+  count=$(echo "$turns_json" | jq 'length' 2>/dev/null || echo "0")
+  if [ "$count" -lt 3 ]; then
+    echo "$default_max"
+    return
+  fi
+
+  # Calculer le p75 (75ème percentile) + 30% de marge
+  local adaptive
+  adaptive=$(echo "$turns_json" | jq '
+    sort |
+    (length * 0.75 | floor) as $idx |
+    .[$idx] * 1.3 |
+    ceil |
+    if . < 5 then 5 else . end
+  ' 2>/dev/null || echo "$default_max")
+
+  # Ne jamais dépasser le défaut (garde-fou), ne jamais descendre sous 5
+  if [ "$adaptive" -gt "$default_max" ] 2>/dev/null; then
+    echo "$default_max"
+  elif [ "$adaptive" -lt 5 ] 2>/dev/null; then
+    echo "5"
+  else
+    echo "$adaptive"
+  fi
 }
 
 # === FONCTIONS UTILITAIRES ===
@@ -446,6 +492,7 @@ track_tokens() {
   local feature="${2:-}"
   local json_output="$3"
   local model="${4:-unknown}"
+  local actual_turns="${5:-0}"
 
   if ! command -v jq &> /dev/null; then
     return 0
@@ -492,6 +539,7 @@ track_tokens() {
     --arg feature "$feature" \
     --arg ts "$timestamp" \
     --arg model "$model" \
+    --argjson turns "$actual_turns" \
     '
     .total_input_tokens = $total_in |
     .total_output_tokens = $total_out |
@@ -502,6 +550,7 @@ track_tokens() {
     .by_phase[$phase].cost_usd = ((.by_phase[$phase].cost_usd // 0) + $cost) |
     .by_phase[$phase].calls = ((.by_phase[$phase].calls // 0) + 1) |
     .by_phase[$phase].models_used[$model] = ((.by_phase[$phase].models_used[$model] // 0) + 1) |
+    .by_phase[$phase].turns_history = ((.by_phase[$phase].turns_history // []) + [$turns]) |
     (if $feature != "" then
       .by_feature[$feature].input_tokens = ((.by_feature[$feature].input_tokens // 0) + $input) |
       .by_feature[$feature].output_tokens = ((.by_feature[$feature].output_tokens // 0) + $output) |
@@ -512,6 +561,7 @@ track_tokens() {
       "phase": $phase,
       "feature": $feature,
       "model": $model,
+      "turns": $turns,
       "input_tokens": $input,
       "output_tokens": $output,
       "cost_usd": $cost
@@ -555,16 +605,27 @@ print_cost_summary() {
 }
 
 # Run Claude avec tracking de tokens et logs temps réel
+# Args: prompt, max_turns, log_file, phase_name, feature_name, [system_prompt]
 run_claude() {
   local prompt="$1"
   local max_turns="${2:-$MAX_TURNS_PER_INVOCATION}"
   local log_file="${3:-/dev/null}"
   local phase_name="${4:-unknown}"
   local feature_name="${5:-}"
+  local custom_system_prompt="${6:-}"
 
   local exit_code=0
   local start_time
   start_time=$(date +%s)
+
+  # Apprentissage adaptatif : ajuster max_turns selon l'historique réel
+  local original_max="$max_turns"
+  local adapted
+  adapted=$(adaptive_max_turns "$phase_name" "$max_turns")
+  if [ "$adapted" != "$max_turns" ]; then
+    log INFO "  Turns adaptatifs: $max_turns → $adapted [phase=$phase_name] (basé sur l'historique)"
+    max_turns="$adapted"
+  fi
 
   log INFO "→ Claude lancé [phase=$phase_name] [max_turns=$max_turns]..."
 
@@ -684,19 +745,31 @@ $prompt"
 
   TMP_JSON=$(mktemp)
 
-  # Note: CLAUDE.md est lu automatiquement par Claude Code via -d "$PROJECT_DIR"
-  # Le prompt caching Anthropic cache les préfixes côté serveur automatiquement.
-  # L'injection directe de INDEX.md + auto-map.md dans context_hint est le meilleur
-  # compromis : pas de tool call overhead, et le contenu change entre les features.
+  # System prompt personnalisé (multi-agent : coder vs reviewer)
+  local system_flag=""
+  if [ -n "$custom_system_prompt" ]; then
+    system_flag="--system-prompt"
+  fi
 
   # shellcheck disable=SC2086
-  claude -p "$full_prompt" \
-    --dangerously-skip-permissions \
-    --max-turns "$max_turns" \
-    --output-format stream-json \
-    --verbose \
-    $model_flag \
-    -d "$PROJECT_DIR" > "$TMP_JSON" 2>&1 &
+  if [ -n "$custom_system_prompt" ]; then
+    claude -p "$full_prompt" \
+      --dangerously-skip-permissions \
+      --max-turns "$max_turns" \
+      --output-format stream-json \
+      --verbose \
+      $model_flag \
+      --system-prompt "$custom_system_prompt" \
+      -d "$PROJECT_DIR" > "$TMP_JSON" 2>&1 &
+  else
+    claude -p "$full_prompt" \
+      --dangerously-skip-permissions \
+      --max-turns "$max_turns" \
+      --output-format stream-json \
+      --verbose \
+      $model_flag \
+      -d "$PROJECT_DIR" > "$TMP_JSON" 2>&1 &
+  fi
 
   CLAUDE_PID=$!
 
@@ -810,7 +883,11 @@ $prompt"
     fi
   fi
 
-  track_tokens "$phase_name" "$feature_name" "$json_output" "$effective_model"
+  # Compter les turns réellement utilisés (nombre de messages assistant dans le stream)
+  local actual_turns=0
+  actual_turns=$(grep -c '"type":"assistant"' "$TMP_JSON" 2>/dev/null || echo "0")
+
+  track_tokens "$phase_name" "$feature_name" "$json_output" "$effective_model" "$actual_turns"
 
   if [ -n "${MAX_BUDGET_USD:-}" ]; then
     local over_budget
@@ -2217,11 +2294,13 @@ Corrige les erreurs de lint. Ne change PAS la logique, uniquement le formatage/s
     fi
   fi
 
-  # --- Review adversariale (modèle léger, détecte les bugs évidents) ---
+  # --- Review adversariale (multi-agent : persona destructif, distinct du coder) ---
   update_phase_tracking "critic" "$feature_name"
   log INFO "Review adversariale en cours..."
   critic_prompt=$(render_phase "03b-critic.md" "FEATURE_NAME=$feature_name")
-  run_claude "$critic_prompt" 10 "$LOG_DIR/feature-$FEATURE_COUNT-critic.log" "critic" "$feature_name" || {
+  # System prompt adversarial : persona distinct du coder
+  local critic_system="Tu es un REVIEWER SENIOR sceptique et méticuleux. Tu n'as PAS écrit ce code — un autre développeur l'a fait. Ton seul objectif est de trouver les bugs, failles et problèmes AVANT que ça parte en production. Tu es payé pour casser, pas pour complimenter. Sois direct et factuel."
+  run_claude "$critic_prompt" 10 "$LOG_DIR/feature-$FEATURE_COUNT-critic.log" "critic" "$feature_name" "$critic_system" || {
     log WARN "Review adversariale échouée — on continue."
   }
 
