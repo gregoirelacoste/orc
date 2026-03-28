@@ -3064,20 +3064,28 @@ COMMANDE DEV SERVER : ${DEV_COMMAND:-npm run dev}"
 
     # Phase QA : test fonctionnel réel (curl + navigateur)
     if [ -n "${DEV_COMMAND:-}" ]; then
+      local qa_port="${DEV_PORT:-3000}"
       log PHASE "QA — Epic $epic_number"
       update_phase_tracking "qa" "epic-$epic_number"
+
+      # Kill tout process résiduel sur le port (acceptance précédente, crash, etc.)
+      lsof -ti:"$qa_port" | xargs kill 2>/dev/null || true
+
       qa_prompt=""
       qa_prompt=$(render_phase "04c-qa.md" \
         "EPIC_NUMBER=$epic_number" \
         "FEATURE_COUNT=$FEATURE_COUNT" \
-        "PORT=${DEV_PORT:-3000}")
+        "PORT=$qa_port")
       qa_prompt="$qa_prompt
 
 COMMANDE DEV SERVER : ${DEV_COMMAND}
-PORT : ${DEV_PORT:-3000}"
+PORT : ${qa_port}"
       run_claude "$qa_prompt" 30 "$LOG_DIR/qa-epic-$epic_number.log" "qa" "epic-$epic_number" || {
         log WARN "QA échouée — on continue."
       }
+
+      # Cleanup : kill le serveur dev si Claude ne l'a pas fait
+      lsof -ti:"$qa_port" | xargs kill 2>/dev/null || true
     else
       log INFO "QA skippée (pas de DEV_COMMAND configurée)."
     fi
