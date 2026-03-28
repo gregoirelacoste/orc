@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+# Bash 4+ requis pour declare -A (associative arrays)
+if ((BASH_VERSINFO[0] < 4)); then
+  echo "ERREUR: bash 4+ requis (actuel: $BASH_VERSION). Sur macOS: brew install bash" >&2
+  exit 1
+fi
+
 # ============================================================
 # Agent Autonome Claude — Orchestrateur principal
 # ============================================================
@@ -59,9 +65,54 @@ TOTAL_INPUT_TOKENS=0
 TOTAL_OUTPUT_TOKENS=0
 TOTAL_COST_USD=0
 
-# Coût par token (Claude Opus 4, en USD) — ajuster selon le modèle
-COST_PER_INPUT_TOKEN=0.000015
-COST_PER_OUTPUT_TOKEN=0.000075
+# Pricing dynamique par modèle (USD par token)
+# Clé = préfixe du modèle, valeur = "input_cost:output_cost"
+declare -A MODEL_PRICING=(
+  ["claude-opus-4"]="0.000015:0.000075"
+  ["claude-sonnet-4"]="0.000003:0.000015"
+  ["claude-haiku-4"]="0.0000008:0.000004"
+)
+# Fallback si modèle inconnu (tarif Sonnet = raisonnable par défaut)
+DEFAULT_COST_PER_INPUT_TOKEN=0.000003
+DEFAULT_COST_PER_OUTPUT_TOKEN=0.000015
+
+# Résoudre le pricing pour un modèle donné
+# Usage: get_model_pricing "claude-sonnet-4-6-20250514" → set COST_PER_INPUT_TOKEN et COST_PER_OUTPUT_TOKEN
+# Note: itère les préfixes du plus long au plus court pour éviter les matchs ambigus
+get_model_pricing() {
+  local model="${1:-}"
+  COST_PER_INPUT_TOKEN="$DEFAULT_COST_PER_INPUT_TOKEN"
+  COST_PER_OUTPUT_TOKEN="$DEFAULT_COST_PER_OUTPUT_TOKEN"
+  # Trier les préfixes par longueur décroissante (le plus spécifique matche d'abord)
+  local sorted_prefixes
+  sorted_prefixes=$(for p in "${!MODEL_PRICING[@]}"; do echo "$p"; done | awk '{print length, $0}' | sort -rn | cut -d' ' -f2-)
+  while IFS= read -r prefix; do
+    if [[ "$model" == "$prefix"* ]]; then
+      COST_PER_INPUT_TOKEN="${MODEL_PRICING[$prefix]%%:*}"
+      COST_PER_OUTPUT_TOKEN="${MODEL_PRICING[$prefix]##*:}"
+      return 0
+    fi
+  done <<< "$sorted_prefixes"
+  # Aucun préfixe connu n'a matché — warning pour visibilité
+  if [ -n "$model" ]; then
+    log WARN "Modèle '$model' inconnu dans MODEL_PRICING — fallback tarif Sonnet (\$${DEFAULT_COST_PER_INPUT_TOKEN}/\$${DEFAULT_COST_PER_OUTPUT_TOKEN})"
+  fi
+}
+
+# Phases légères qui utilisent CLAUDE_MODEL_LIGHT si disponible
+# Phases non-code : pas besoin du modèle principal (text, recherche web, décision)
+LIGHT_PHASES="reflection reflect self-improve meta-retro quality strategy research-initial research-epic evolve"
+
+# Résoudre le modèle effectif pour une phase donnée
+# Usage: resolve_model "reflection" → affiche le modèle à utiliser
+resolve_model() {
+  local phase="$1"
+  if [ -n "${CLAUDE_MODEL_LIGHT:-}" ] && [[ " $LIGHT_PHASES " == *" $phase "* ]]; then
+    echo "$CLAUDE_MODEL_LIGHT"
+  else
+    echo "${CLAUDE_MODEL:-}"
+  fi
+}
 
 # === LOCKFILE ===
 LOCKFILE="$SCRIPT_DIR/.orc/.lock"
@@ -127,6 +178,24 @@ clear_action_required() {
 }
 
 # === FONCTIONS UTILITAIRES ===
+
+# Troncation intelligente : garde le début et la fin d'un output
+# pour ne pas perdre le message d'erreur initial (souvent en tête)
+# Usage: smart_truncate "$output" 3000  → 500 premiers chars + ... + 2500 derniers chars
+smart_truncate() {
+  local text="$1"
+  local max_chars="${2:-3000}"
+  local len=${#text}
+  if [ "$len" -le "$max_chars" ]; then
+    echo "$text"
+    return
+  fi
+  local head_chars=$(( max_chars / 6 ))       # ~500 chars du début
+  local tail_chars=$(( max_chars - head_chars - 20 ))  # le reste de la fin
+  echo "${text:0:$head_chars}
+... (tronqué: ${len} chars, début+fin conservés) ...
+${text: -$tail_chars}"
+}
 
 log() {
   local level="$1" msg="$2"
@@ -282,7 +351,7 @@ run_functional_check() {
 COMMANDE : $FUNCTIONAL_CHECK_COMMAND
 EXIT CODE : $func_exit
 OUTPUT :
-${func_output: -3000}
+$(smart_truncate "$func_output" 3000)
 
 RÈGLE ABSOLUE : l'application DOIT être fonctionnelle après chaque feature.
 Corrige le problème pour que l'app démarre/fonctionne correctement.
@@ -447,7 +516,6 @@ run_claude() {
   local feature_name="${5:-}"
 
   local exit_code=0
-  TMP_JSON=$(mktemp)
   local start_time
   start_time=$(date +%s)
 
@@ -500,13 +568,41 @@ ${context_hint}
 
 $prompt"
 
-  # Lancer Claude en background avec output stream-JSON (JSONL)
-  # stream-json produit des événements au fil de l'eau → le watchdog
-  # peut détecter les vrais stalls (contrairement à json qui bufferise tout)
+  # Résoudre le modèle selon la phase (principal ou léger)
+  local effective_model
+  effective_model=$(resolve_model "$phase_name")
   local model_flag=""
-  if [ -n "${CLAUDE_MODEL:-}" ]; then
-    model_flag="--model $CLAUDE_MODEL"
+  if [ -n "$effective_model" ]; then
+    model_flag="--model $effective_model"
+    log INFO "  Modèle: $effective_model [phase=$phase_name]"
   fi
+
+  # Résoudre le pricing pour le tracking
+  get_model_pricing "$effective_model"
+
+  # Budget prédictif : estimer le coût AVANT de lancer (et avant mktemp)
+  if [ -n "${MAX_BUDGET_USD:-}" ]; then
+    # Estimation conservatrice : ~4000 tokens input + ~2000 output par turn
+    local est_input=$(( max_turns * 4000 ))
+    local est_output=$(( max_turns * 2000 ))
+    local est_cost
+    est_cost=$(awk "BEGIN {printf \"%.2f\", $est_input * $COST_PER_INPUT_TOKEN + $est_output * $COST_PER_OUTPUT_TOKEN}")
+    local remaining
+    remaining=$(awk "BEGIN {printf \"%.2f\", $MAX_BUDGET_USD - $TOTAL_COST_USD}")
+    local would_exceed
+    would_exceed=$(awk "BEGIN {print ($TOTAL_COST_USD + $est_cost > $MAX_BUDGET_USD) ? \"yes\" : \"no\"}")
+    if [ "$would_exceed" = "yes" ]; then
+      log WARN "Budget prédictif : ~\$${est_cost} estimé, \$${remaining} restant — skip phase '$phase_name'"
+      log ERROR "Budget insuffisant — arrêt propre du run."
+      print_cost_summary
+      RUN_STATUS="budget_exceeded"
+      RUN_ENDED_AT=$(date -Iseconds)
+      save_state
+      exit 0
+    fi
+  fi
+
+  TMP_JSON=$(mktemp)
 
   # shellcheck disable=SC2086
   claude -p "$full_prompt" \
@@ -550,6 +646,18 @@ $prompt"
     # Si bloqué depuis 2 minutes (24 x 5s), log un warning
     if [ "$stall_count" -eq 24 ]; then
       log WARN "Claude semble bloqué (pas de nouvelles données depuis 2min) [phase=$phase_name]"
+    fi
+
+    # Kill auto si stall prolongé (STALL_KILL_THRESHOLD × 5s)
+    local stall_kill_threshold="${STALL_KILL_THRESHOLD:-0}"
+    if [ "$stall_kill_threshold" -gt 0 ] && [ "$stall_count" -ge "$stall_kill_threshold" ]; then
+      local stall_mins=$(( stall_count * 5 / 60 ))
+      log ERROR "Claude bloqué depuis ${stall_mins}min — kill auto [phase=$phase_name]"
+      kill "$CLAUDE_PID" 2>/dev/null || true
+      wait "$CLAUDE_PID" 2>/dev/null || true
+      exit_code=124
+      CLAUDE_PID=""
+      break
     fi
 
     # Timeout global : kill si dépassé
@@ -748,6 +856,14 @@ check_signals() {
     save_state
     print_cost_summary
     exit 0
+  fi
+
+  # Signal : skip la feature en cours
+  if [ -f "$signal_dir/skip-feature" ]; then
+    rm -f "$signal_dir/skip-feature"
+    log WARN "Signal skip-feature détecté — abandon de la feature en cours."
+    notify "Feature '${CURRENT_FEATURE:-inconnue}' skippée par signal humain."
+    SKIP_CURRENT_FEATURE=true
   fi
 }
 
@@ -1418,7 +1534,16 @@ LAST_ERROR_HASH=""
 # Compare l'erreur courante avec la précédente pour détecter les boucles
 error_hash() {
   local output="$1"
-  echo "$output" | head -20 | md5sum | cut -d' ' -f1
+  # Extraire les lignes d'erreur, supprimer les numéros de ligne/timestamps
+  # pour comparer la structure de l'erreur, pas sa position exacte
+  local filtered
+  filtered=$(echo "$output" | grep -iE 'error|fail|exception|TypeError|SyntaxError|cannot find|not found|unexpected' | \
+    sed 's/[0-9]\+//g' | sort -u | head -10)
+  # Fallback sur head -20 si aucune ligne d'erreur trouvée
+  if [ -z "$filtered" ]; then
+    filtered=$(echo "$output" | head -20)
+  fi
+  echo "$filtered" | md5sum | cut -d' ' -f1
 }
 
 # === QUALITY GATE ===
@@ -1850,8 +1975,12 @@ if ! grep -q '^\- \[ \]' "$PROJECT_DIR/.orc/ROADMAP.md" 2>/dev/null; then
 fi
 
 # ============================================================
-# PHASE 3 — BOUCLE PRINCIPALE
+# PHASE 3 — BOUCLE PRINCIPALE (avec cycles evolve intégrés)
 # ============================================================
+
+# Boucle englobante : feature loop + evolve, sans exec "$0" restart
+MAIN_LOOP_CONTINUE=true
+while [ "$MAIN_LOOP_CONTINUE" = true ]; do
 
 log PHASE "PHASE 3 — BOUCLE DE DÉVELOPPEMENT"
 
@@ -1877,7 +2006,17 @@ while [ $FEATURE_COUNT -lt $MAX_FEATURES ]; do
   gh_comment "🚀 **Feature #$FEATURE_COUNT** : $feature_name — démarrage"
 
   # --- Vérifier les signaux humains ---
+  SKIP_CURRENT_FEATURE=false
   check_signals
+
+  # Skip demandé par signal humain → passer à la feature suivante
+  if [ "$SKIP_CURRENT_FEATURE" = true ]; then
+    log WARN "Feature '$feature_name' skippée par signal humain."
+    timeline_update_last "skipped" 0
+    mark_feature_done_bash "$feature_name"  # Cocher pour ne pas la reprendre
+    run_in_project "git checkout main 2>/dev/null || true"
+    continue
+  fi
 
   # --- S'assurer qu'on est sur main avant de commencer ---
   run_in_project "git checkout main 2>/dev/null || true"
@@ -1934,6 +2073,26 @@ $(cat "$prev_feedback")"
   fi
 
   run_claude "$impl_prompt" "$MAX_TURNS_PER_INVOCATION" "$LOG_DIR/feature-$FEATURE_COUNT-impl.log" "implement" "$feature_name"
+
+  # --- Lint (rapide, avant les tests) ---
+  if [ -n "${LINT_COMMAND:-}" ]; then
+    log INFO "Lint en cours..."
+    LINT_OUTPUT=$(run_in_project "$LINT_COMMAND 2>&1") && LINT_EXIT=0 || LINT_EXIT=$?
+    if [ $LINT_EXIT -ne 0 ]; then
+      log WARN "Lint échoué — correction rapide avant les tests..."
+      run_claude "Le lint a échoué après l'implémentation de la feature '$feature_name'.
+
+COMMANDE : $LINT_COMMAND
+EXIT CODE : $LINT_EXIT
+OUTPUT :
+$(smart_truncate "$LINT_OUTPUT" 2000)
+
+Corrige les erreurs de lint. Ne change PAS la logique, uniquement le formatage/style." \
+        10 "$LOG_DIR/feature-$FEATURE_COUNT-lint.log" "fix" "$feature_name" || true
+    else
+      log INFO "Lint OK."
+    fi
+  fi
 
   # --- Test & Fix Loop (avec détection de boucle) ---
   update_phase_tracking "test-fix" "$feature_name"
@@ -1994,29 +2153,20 @@ Résoudre :
         break
       fi
 
-      # Réflexion structurée (pattern Reflexion) : l'IA écrit ce qu'elle a tenté et pourquoi ça a échoué
+      # Construire le prompt de fix avec réflexion intégrée (1 invocation au lieu de 2)
       reflection_file="$PROJECT_DIR/.orc/logs/fix-reflections-$FEATURE_COUNT.md"
-      run_claude "Tu viens d'essayer de corriger la feature '$feature_name' (tentative $attempt/$MAX_FIX_ATTEMPTS) et ça a échoué.
+      fix_prompt=$(write_fix_prompt "$attempt" "$MAX_FIX_ATTEMPTS" \
+        "$BUILD_EXIT" "$(smart_truncate "$BUILD_OUTPUT" 3000)" \
+        "$TEST_EXIT" "$(smart_truncate "$TEST_OUTPUT" 3000)")
 
-BUILD (exit $BUILD_EXIT):
-${BUILD_OUTPUT: -1500}
+      # Réflexion structurée intégrée au fix (pattern Reflexion sans invocation séparée)
+      fix_prompt="$fix_prompt
 
-TESTS (exit $TEST_EXIT):
-${TEST_OUTPUT: -1500}
-
-Écris une RÉFLEXION STRUCTURÉE (3-5 lignes max) dans ce format :
+AVANT DE CODER, écris une RÉFLEXION STRUCTURÉE (3-5 lignes) dans .orc/logs/fix-reflections-$FEATURE_COUNT.md (append) :
 - **Ce que j'ai tenté :** [description de l'approche]
 - **Pourquoi ça a échoué :** [cause racine identifiée]
-- **Ce que je dois essayer :** [nouvelle approche concrète]
-
-Écris cette réflexion dans le fichier .orc/logs/fix-reflections-$FEATURE_COUNT.md (append).
-Ne modifie PAS le code dans cette étape — uniquement la réflexion." \
-        5 "$LOG_DIR/feature-$FEATURE_COUNT-reflection-$attempt.log" "reflection" "$feature_name" || true
-
-      # Construire le prompt de fix avec les réflexions passées
-      fix_prompt=$(write_fix_prompt "$attempt" "$MAX_FIX_ATTEMPTS" \
-        "$BUILD_EXIT" "${BUILD_OUTPUT: -3000}" \
-        "$TEST_EXIT" "${TEST_OUTPUT: -3000}")
+- **Ce que je vais essayer :** [nouvelle approche concrète]
+Puis applique la correction."
 
       # Injecter les réflexions passées
       if [ -f "$reflection_file" ]; then
@@ -2024,6 +2174,15 @@ Ne modifie PAS le code dans cette étape — uniquement la réflexion." \
 
 RÉFLEXIONS DES TENTATIVES PRÉCÉDENTES (en tenir compte pour ne PAS refaire les mêmes erreurs) :
 $(cat "$reflection_file")"
+      fi
+
+      # Injecter les problèmes connus inter-features
+      local known_issues="$PROJECT_DIR/.orc/known-issues.md"
+      if [ -f "$known_issues" ]; then
+        fix_prompt="$fix_prompt
+
+PROBLÈMES DÉJÀ RÉSOLUS SUR CE PROJET (solutions connues) :
+$(cat "$known_issues")"
       fi
 
       if [ "$same_error_count" -eq 1 ]; then
@@ -2053,6 +2212,21 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
     gh_create_abandoned_issue "$feature_name" "$attempt"
     # Retour sur main pour ne pas polluer la feature suivante
     run_in_project "git checkout main 2>/dev/null || true"
+  elif [ "$attempt" -gt 0 ]; then
+    # Fix réussi après des échecs → mémoriser dans known-issues.md pour les futures features
+    local known_issues="$PROJECT_DIR/.orc/known-issues.md"
+    local reflection_file="$PROJECT_DIR/.orc/logs/fix-reflections-$FEATURE_COUNT.md"
+    if [ -f "$reflection_file" ]; then
+      {
+        echo ""
+        echo "### Feature #$FEATURE_COUNT: $feature_name (résolu en $attempt tentatives)"
+        echo ""
+        # Extraire la dernière réflexion (celle qui a mené au fix)
+        tail -5 "$reflection_file"
+        echo ""
+      } >> "$known_issues"
+      log INFO "Problème résolu mémorisé dans known-issues.md"
+    fi
   fi
 
   # --- Reflect & Evolve ---
@@ -2079,7 +2253,7 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
 COMMANDE : $QUALITY_COMMAND
 EXIT CODE : $quality_exit
 OUTPUT :
-${quality_output: -3000}
+$(smart_truncate "$quality_output" 3000)
 
 Corrige le problème de qualité sans casser les tests existants.
 Exemples de problèmes : performance dégradée, bundle trop gros, couverture insuffisante, score lighthouse en baisse." \
@@ -2194,6 +2368,7 @@ if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
   if [ "$max_evolve" -gt 0 ] && [ "$EVOLVE_CYCLES" -gt "$max_evolve" ]; then
     log WARN "Limite de cycles evolve atteinte ($EVOLVE_CYCLES/$max_evolve) — arrêt."
     notify "Limite de cycles evolve atteinte ($max_evolve). Projet terminé automatiquement."
+    MAIN_LOOP_CONTINUE=false
   else
     log PHASE "PHASE FINALE — ÉVOLUTION (cycle $EVOLVE_CYCLES)"
     evolve_prompt=$(render_phase "07-evolve.md")
@@ -2216,10 +2391,16 @@ if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
 
       log INFO "Nouvelles features ajoutées — relancement de la boucle."
       save_state
-      exec "$0"
+      # Relancer la boucle englobante au lieu de exec "$0"
+    else
+      MAIN_LOOP_CONTINUE=false
     fi
   fi
+else
+  MAIN_LOOP_CONTINUE=false
 fi
+
+done  # fin MAIN_LOOP (while MAIN_LOOP_CONTINUE)
 
 # ============================================================
 # PHASE POST-PROJET — AUTO-AMÉLIORATION DE L'ORCHESTRATEUR

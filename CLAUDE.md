@@ -117,6 +117,18 @@ Skills Claude Code disponibles pour travailler sur orc lui-même :
 ### run_claude()
 Point central — lance Claude en background, monitore le heartbeat, détecte les stalls, enforce le timeout, track les tokens. Toute modification ici impacte tout le système.
 
+### Modèle adaptatif par phase
+`CLAUDE_MODEL` = modèle principal (implement, strategy, fix, bootstrap, research). `CLAUDE_MODEL_LIGHT` = modèle léger pour phases simples (reflection, reflect, self-improve, meta-retro, quality). `resolve_model()` choisit le modèle selon la phase. Si `CLAUDE_MODEL_LIGHT` est vide, toutes les phases utilisent `CLAUDE_MODEL`.
+
+### Pricing dynamique
+`MODEL_PRICING` (associative array) contient les tarifs par préfixe de modèle. `get_model_pricing()` résout le coût input/output pour le modèle effectif. Fallback sur tarif Sonnet si modèle inconnu.
+
+### Budget prédictif
+Avant chaque invocation, `run_claude()` estime le coût probable (~4000 tokens input + ~2000 output par turn) et refuse de lancer si le budget restant serait dépassé. Complète le check post-hoc existant.
+
+### Stall kill auto
+`STALL_KILL_THRESHOLD` (config, défaut 60 = 5min) : kill automatique si Claude ne produit aucune donnée pendant ce seuil. Complète le warning à 2min et le timeout global.
+
 ### render_phase()
 Substitue `{{VAR}}` dans les prompts. Attention : la substitution bash `${content//pattern/replacement}` casse si `replacement` contient `/` ou `\`. Pour les outputs build/test, utiliser `write_fix_prompt()` à la place.
 
@@ -125,8 +137,14 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 
 ### Contrôle humain mid-run
 - `.orc/human-notes.md` : lu et injecté dans le prompt avant chaque feature
-- `.orc/pause-requested` / `.orc/stop-after-feature` : signaux file-based pour le mode nohup
+- `.orc/pause-requested` / `.orc/stop-after-feature` / `.orc/skip-feature` : signaux file-based pour le mode nohup
 - `.orc/logs/human-feedback-N.md` : feedback structuré, prioritaire sur les observations de l'IA
+
+### Mémoire inter-features (known-issues.md)
+`.orc/known-issues.md` : alimenté automatiquement quand un fix réussit après des échecs. Contient la réflexion qui a mené au fix. Injecté dans le prompt de fix des features suivantes pour ne pas répéter les mêmes erreurs.
+
+### Lint pré-tests
+Si `LINT_COMMAND` est défini, exécuté entre implement et la boucle test/fix. En cas d'échec, correction automatique par Claude (10 turns max) avant de lancer les tests.
 
 ### GitHub Integration (local-first, GitHub-augmented)
 **Principe** : local = source de vérité, GitHub = miroir de visibilité. Tout fonctionne sans GitHub. Chaque option est indépendante et off par défaut.
@@ -141,7 +159,7 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 - Fonctions préfixées `gh_*` dans `orchestrator.sh` — Phase 1 (PR/tracking), Phase 2 (roadmap sync/feedback), Phase 3 (CI/releases).
 
 ### Détection de boucle fix
-`error_hash()` compare les erreurs entre tentatives. Même erreur 2x → prompt "change d'approche". 3x → abandon anticipé.
+`error_hash()` extrait les lignes contenant `error/fail/exception`, supprime les numéros de ligne, trie et hashe. Compare la structure de l'erreur (pas sa position). Même erreur 2x → prompt "change d'approche". 3x → abandon anticipé.
 
 ### Quality gate
 `QUALITY_COMMAND` exécuté après tests, avant merge. Non-bloquant si échec après correction.

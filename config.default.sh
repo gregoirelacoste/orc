@@ -9,7 +9,7 @@ PROJECT_DIR="."                          # Racine du workspace (= le projet)
 PROJECT_NAME=""                          # Nom du projet (rempli par init.sh)
 
 # === GARDE-FOUS ===
-MAX_FIX_ATTEMPTS=5                       # Tentatives de correction par feature
+MAX_FIX_ATTEMPTS=3                       # Tentatives de correction par feature
 MAX_FEATURES=50                          # Nombre total de features avant arrêt
 MAX_TURNS_PER_INVOCATION=50              # Limite de turns par appel Claude
 
@@ -51,9 +51,9 @@ NOTIFY_COMMAND=""                        # Commande de notification (vide = dés
 
 # === RECHERCHE ===
 ENABLE_RESEARCH=true                     # Activer la veille marché
-MAX_TURNS_RESEARCH_INITIAL=80            # Budget recherche initiale
-MAX_TURNS_RESEARCH_EPIC=40               # Budget veille ciblée par epic
-MAX_TURNS_RESEARCH_TREND=50              # Budget veille tendances (méta-rétro)
+MAX_TURNS_RESEARCH_INITIAL=50            # Budget recherche initiale
+MAX_TURNS_RESEARCH_EPIC=20               # Budget veille ciblée par epic
+MAX_TURNS_RESEARCH_TREND=30              # Budget veille tendances (méta-rétro)
 
 # === TECHNIQUE ===
 BUILD_COMMAND="npm run build"            # Commande de build
@@ -66,14 +66,18 @@ FUNCTIONAL_CHECK_COMMAND=""              # Vérification fonctionnelle post-feat
                                          # L'app DOIT être fonctionnelle après chaque feature.
                                          # Ex: "npm start -- --check" ou "curl -sf http://localhost:3000/health"
                                          # ou "docker compose up -d && sleep 5 && curl -sf localhost:3000 && docker compose down"
-CLAUDE_MODEL=""                          # Modèle Claude (vide = défaut CLI). Ex: "claude-sonnet-4-6-20250514"
+CLAUDE_MODEL=""                          # Modèle principal (implement, strategy, fix). Ex: "claude-sonnet-4-6-20250514"
+CLAUDE_MODEL_LIGHT=""                    # Modèle léger pour phases simples (reflection, reflect, self-improve)
+                                         # Ex: "claude-haiku-4-5-20251001". Vide = utilise CLAUDE_MODEL.
 
 # === BUDGET ===
 MAX_BUDGET_USD=""                        # Budget max en USD (vide = illimité). Ex: "5.00"
 
 # === TIMEOUTS ===
-CLAUDE_TIMEOUT=1200                      # Timeout par invocation Claude en secondes (0 = illimité)
-                                         # 1200 = 20min. Les phases WebSearch peuvent être longues.
+CLAUDE_TIMEOUT=900                       # Timeout par invocation Claude en secondes (0 = illimité)
+                                         # 900 = 15min. Les phases WebSearch peuvent être longues.
+STALL_KILL_THRESHOLD=60                  # Nombre de checks sans données avant kill auto (×5s = durée)
+                                         # 60 = 5min sans données → kill. 0 = désactivé (warning seul).
 
 # === LOGS ===
 LOG_DIR="./.orc/logs"                    # Dossier des logs orchestrateur (dans .orc/)
