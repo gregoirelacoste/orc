@@ -722,12 +722,10 @@ Lis aussi :
       ;;
     reflect)
       context_hint="
-EXPORTS ET CLASSES (auto-map.md — vérité du code, auto-généré) :
-${automap_content:-[pas encore généré]}
-
-Mets à jour :
-- .orc/codebase/INDEX.md + les fichiers de détail impactés par cette feature
-- .claude/skills/stack-conventions.md si nouveaux patterns"
+Mets à jour après cette feature :
+- .orc/codebase/INDEX.md + les fichiers de détail impactés
+- .claude/skills/stack-conventions.md si nouveaux patterns
+Note : auto-map.md est déjà régénéré automatiquement (pas besoin de le lire)."
       ;;
     meta-retro)
       context_hint="
@@ -2236,7 +2234,7 @@ $learnings_content"
     log INFO "Learnings inter-projets injectés dans le prompt bootstrap."
   fi
 
-  run_claude "$local_prompt" 60 "$LOG_DIR/00-bootstrap.log" "bootstrap"
+  run_claude "$local_prompt" 30 "$LOG_DIR/00-bootstrap.log" "bootstrap"
 
   # Créer la tracking issue GitHub si configuré
   if [ -z "$TRACKING_ISSUE_NUMBER" ]; then
@@ -2514,13 +2512,13 @@ RÉFLEXIONS DES TENTATIVES PRÉCÉDENTES (en tenir compte pour ne PAS refaire le
 $(cat "$reflection_file")"
       fi
 
-      # Injecter les problèmes connus inter-features
+      # Injecter les problèmes connus inter-features (10 dernières entrées max)
       local known_issues="$PROJECT_DIR/.orc/known-issues.md"
       if [ -f "$known_issues" ]; then
         fix_prompt="$fix_prompt
 
 PROBLÈMES DÉJÀ RÉSOLUS SUR CE PROJET (solutions connues) :
-$(cat "$known_issues")"
+$(tail -60 "$known_issues")"
       fi
 
       if [ "$same_error_count" -eq 1 ]; then
@@ -2570,12 +2568,28 @@ Ton approche actuelle ne fonctionne pas. Tu DOIS :
   # --- Reflect & Evolve ---
   update_phase_tracking "reflect" "$feature_name"
   log INFO "Rétrospective..."
+
+  # Métriques bash pré-calculées (évite que Claude perde des turns à les collecter)
+  local files_changed lines_added lines_deleted
+  files_changed=$(run_in_project "git diff --name-only HEAD~1 2>/dev/null | wc -l" || echo "?")
+  lines_added=$(run_in_project "git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oP '\\d+ insertion' | grep -oP '\\d+'" || echo "?")
+  lines_deleted=$(run_in_project "git diff --stat HEAD~1 2>/dev/null | tail -1 | grep -oP '\\d+ deletion' | grep -oP '\\d+'" || echo "?")
+
   reflect_prompt=$(render_phase "05-reflect.md" \
     "FEATURE_NAME=$feature_name" \
     "TESTS_PASSED=$tests_passed" \
     "FIX_ATTEMPTS=$attempt" \
     "N=$FEATURE_COUNT")
-  run_claude "$reflect_prompt" 20 "$LOG_DIR/feature-$FEATURE_COUNT-reflect.log" "reflect" "$feature_name" || {
+
+  reflect_prompt="$reflect_prompt
+
+MÉTRIQUES (pré-calculées, pas besoin de les recalculer) :
+- Fichiers modifiés : $files_changed
+- Lignes ajoutées : ${lines_added:-0} | supprimées : ${lines_deleted:-0}
+- Tentatives de fix : $attempt
+- Coût cumulé : \$$TOTAL_COST_USD"
+
+  run_claude "$reflect_prompt" 15 "$LOG_DIR/feature-$FEATURE_COUNT-reflect.log" "reflect" "$feature_name" || {
     log WARN "Rétrospective échouée — on continue."
   }
 
@@ -2785,56 +2799,23 @@ log PHASE "AUTO-AMÉLIORATION DE L'ORCHESTRATEUR"
 run_claude "$(cat <<'IMPROVE'
 PHASE AUTO-AMÉLIORATION DE L'ORCHESTRATEUR
 
-Le projet est terminé. Analyse l'ensemble des logs pour améliorer
-l'orchestrateur lui-même (pas le projet, l'OUTIL qui pilote les projets).
+Le projet est terminé. Analyse les logs et améliore l'orchestrateur.
 
-Lis :
-1. Tous les fichiers .orc/logs/retrospective-*.md
-2. Tous les fichiers .orc/logs/meta-retrospective-*.md
-3. Tous les fichiers .orc/logs/fix-reflections-*.md
-4. Tous les fichiers .orc/logs/human-feedback-*.md
-5. Le CLAUDE.md final (les règles que tu t'es auto-ajoutées)
-6. Les skills dans .claude/skills/ (celles que tu as créées)
+Lis : .orc/logs/retrospective-*.md, meta-retrospective-*.md, fix-reflections-*.md,
+human-feedback-*.md, CLAUDE.md, .claude/skills/
 
-Analyse :
-- Quels prompts de phase ont produit les meilleurs résultats ?
-- Quels prompts ont dû être "contournés" ou étaient insuffisants ?
-- Quels types d'erreurs l'orchestrateur n'a pas su gérer ?
-- Quelles étapes manquent dans le workflow ?
-- Les garde-fous étaient-ils bien calibrés ?
-- Le système de connaissance (codebase/, auto-map, stack-conventions) a-t-il fonctionné ?
-- La détection de boucle et les réflexions ont-elles aidé ?
-- Le contexte adaptatif par phase était-il pertinent ?
+TÂCHE 1 — Analyse et améliorations proposées :
+Produis `orchestrator-improvements.md` avec : phases à modifier, config à ajuster,
+nouvelles skills, garde-fous, conventions bash. Sois concret.
 
-Produis un fichier `orchestrator-improvements.md` dans le dossier courant
-avec cette structure :
+TÂCHE 2 — Si le fichier .claude/skills/stack-conventions.md existe :
+Ajoute les conventions bash et anti-patterns découverts (sans doublons).
 
-## Améliorations proposées pour l'orchestrateur
+TÂCHE 3 — Si codebase/INDEX.md existe :
+Vérifie s'il faut le mettre à jour (nouvelles fonctions, structure changée).
+Garde-le compact (max 40 lignes).
 
-### Phases à modifier
-Pour chaque phase concernée :
-- **Phase XX** : [problème constaté] → [amélioration proposée]
-
-### Nouvelles phases à ajouter
-- [description de la phase] — [pourquoi elle manquait]
-
-### Config à ajuster
-- [paramètre] : [valeur actuelle] → [valeur recommandée] — [pourquoi]
-
-### Nouvelles skills utiles
-- [nom du skill] — [ce qu'il fait] — [pourquoi il serait utile]
-
-### Système de connaissance (codebase/, auto-map, stack-conventions)
-- [ce qui a bien marché] — [ce qu'il faudrait améliorer]
-- L'index était-il utile ? L'auto-map était-il à jour ? Les conventions respectées ?
-
-### Garde-fous
-- [garde-fou à ajouter/modifier] — [incident qui l'a motivé]
-
-### Conventions bash découvertes
-- Si tu as découvert des patterns bash utiles, note-les pour stack-conventions.md de l'orchestrateur
-
-Sois concret et actionnable.
+Fais les 3 tâches en une seule session.
 IMPROVE
 )" 30 "$LOG_DIR/orchestrator-improvements.log" "self-improve"
 
@@ -2851,44 +2832,6 @@ if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
     cat "$PROJECT_DIR/orchestrator-improvements.md"
   } > "$learning_file"
   log INFO "Learnings sauvés dans le template : $learning_file"
-
-  # Extraire les conventions bash découvertes et les ajouter à ORC stack-conventions
-  orc_conventions="$SCRIPT_DIR/.claude/skills/stack-conventions.md"
-  if [ -f "$orc_conventions" ]; then
-    # Demander à Claude d'enrichir les stack-conventions de ORC
-    run_claude "Lis le fichier orchestrator-improvements.md que tu viens de produire.
-S'il contient des conventions bash, des anti-patterns, ou des patterns utiles
-qui s'appliquent à l'orchestrateur lui-même (pas au projet), alors :
-
-1. Lis le fichier .claude/skills/stack-conventions.md (les conventions actuelles de ORC)
-2. Ajoute les nouvelles conventions découvertes dans les sections appropriées
-3. Ne duplique pas ce qui existe déjà
-4. Garde le fichier concis
-
-S'il n'y a rien de nouveau à ajouter, ne modifie rien." \
-      10 "$LOG_DIR/orc-conventions-update.log" "self-improve" || {
-      log WARN "Mise à jour des conventions ORC échouée — pas grave."
-    }
-  fi
-
-  # Mettre à jour codebase/INDEX.md de ORC si des changements structurels ont été faits
-  orc_index="$SCRIPT_DIR/codebase/INDEX.md"
-  if [ -f "$orc_index" ]; then
-    run_claude "Lis le fichier orchestrator-improvements.md et vérifie si les améliorations
-proposées impactent la structure de l'orchestrateur (nouvelles fonctions, nouveaux fichiers,
-changements de config, nouveaux paramètres).
-
-Si oui :
-1. Lis codebase/INDEX.md (l'index sémantique de ORC)
-2. Lis le fichier de détail pertinent dans codebase/
-3. Mets-les à jour pour refléter les changements
-4. Garde l'index compact (max 40 lignes)
-
-Si les améliorations sont mineures ou ne changent pas la structure, ne modifie rien." \
-      10 "$LOG_DIR/orc-index-update.log" "self-improve" || {
-      log WARN "Mise à jour de l'index ORC échouée — pas grave."
-    }
-  fi
 fi
 
 # ============================================================
