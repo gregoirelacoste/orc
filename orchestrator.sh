@@ -419,6 +419,41 @@ mark_feature_done_bash() {
   log INFO "Roadmap cochée (bash) : $feature_name"
 }
 
+# Met à jour CHANGELOG.md du projet après chaque feature mergée
+update_changelog() {
+  local feature_name="$1"
+  local fix_attempts="${2:-0}"
+  local changelog="$PROJECT_DIR/CHANGELOG.md"
+  local today
+  today=$(date '+%Y-%m-%d')
+
+  # Créer le fichier si absent
+  if [ ! -f "$changelog" ]; then
+    {
+      echo "# Changelog"
+      echo ""
+      echo "Toutes les modifications notables de ce projet sont documentées ici."
+      echo "Généré automatiquement par [ORC](https://github.com/gregoirelacoste/orc)."
+      echo ""
+    } > "$changelog"
+  fi
+
+  # Ajouter l'entrée (insérée après le header, avant les anciennes entrées)
+  local entry="- **$today** — $feature_name"
+  [ "$fix_attempts" -gt 0 ] && entry="$entry ($fix_attempts fix)"
+
+  # Insérer après la première ligne vide suivant le header
+  local tmp_cl
+  tmp_cl=$(mktemp)
+  awk -v entry="$entry" '
+    /^$/ && !inserted && NR > 1 { print; print entry; inserted=1; next }
+    { print }
+  ' "$changelog" > "$tmp_cl" && mv "$tmp_cl" "$changelog"
+
+  # Commit le changelog avec la feature
+  run_in_project "git add CHANGELOG.md 2>/dev/null && git commit --amend --no-edit 2>/dev/null" || true
+}
+
 # Vérification fonctionnelle post-feature
 run_functional_check() {
   local feature_name="$1"
@@ -2183,6 +2218,24 @@ if [ ! -f "$PROJECT_DIR/CLAUDE.md" ]; then
   fi
 
   local_prompt=$(render_phase "00-bootstrap.md")
+
+  # Injecter les learnings inter-projets directement dans le prompt
+  # (au lieu de compter sur Claude pour les lire via tool call)
+  if [ -d "$PROJECT_DIR/learnings" ] && compgen -G "$PROJECT_DIR/learnings/*.md" > /dev/null 2>&1; then
+    local learnings_content=""
+    for lf in "$PROJECT_DIR/learnings/"*.md; do
+      learnings_content="$learnings_content
+--- $(basename "$lf") ---
+$(head -50 "$lf")
+"
+    done
+    local_prompt="$local_prompt
+
+LEARNINGS DES PROJETS PRÉCÉDENTS (intègre les règles pertinentes dans CLAUDE.md) :
+$learnings_content"
+    log INFO "Learnings inter-projets injectés dans le prompt bootstrap."
+  fi
+
   run_claude "$local_prompt" 60 "$LOG_DIR/00-bootstrap.log" "bootstrap"
 
   # Créer la tracking issue GitHub si configuré
@@ -2604,6 +2657,8 @@ Exemples de problèmes : performance dégradée, bundle trop gros, couverture in
     log INFO "Feature '$feature_name' mergée."
     # Cochage fiable de la roadmap (bash-based, en plus de la reflect phase)
     mark_feature_done_bash "$feature_name"
+    # Changelog auto : ajouter l'entrée pour cette feature
+    update_changelog "$feature_name" "$attempt"
     # Vérification fonctionnelle post-merge
     run_functional_check "$feature_name"
     # Mise à jour timeline

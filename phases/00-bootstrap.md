@@ -82,4 +82,11 @@ Tu démarres un nouveau projet autonome.
    - Si Python/Django : models, views, serializers, middleware
    - Adapte au contexte du BRIEF, pas de conventions génériques inutiles
 
-8. Commite : "chore: bootstrap project structure"
+8. Crée un dossier `scripts/` avec des utilitaires adaptés à la stack :
+   - `scripts/dev.sh` — lance le serveur dev avec rechargement auto
+   - `scripts/test.sh` — lance les tests avec options utiles (watch, coverage, filtre)
+   - `scripts/setup.sh` — installe les dépendances + configure l'env
+   Adapte selon la stack. Chaque script doit être exécutable (`chmod +x`).
+   Ne crée pas de scripts inutiles — uniquement ceux qui accélèrent le dev.
+
+9. Commite : "chore: bootstrap project structure"
