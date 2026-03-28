@@ -12,6 +12,7 @@ PROJECT_NAME=""                          # Nom du projet (rempli par init.sh)
 MAX_FIX_ATTEMPTS=3                       # Tentatives de correction par feature
 MAX_FEATURES=50                          # Nombre total de features avant arrêt
 MAX_TURNS_PER_INVOCATION=50              # Limite de turns par appel Claude
+MAX_TURNS_PLAN=8                         # Turns pour la phase plan (5 = souvent trop juste sur gros codebase)
 
 # === RYTHME ===
 EPIC_SIZE=3                              # Nombre de features par epic avant veille ciblée
@@ -23,6 +24,9 @@ REQUIRE_HUMAN_APPROVAL=false             # true = attend validation avant chaque
 AUTO_EVOLVE_ROADMAP=true                 # Claude peut ajouter des features à la roadmap
 MAX_EVOLVE_CYCLES=2                      # Nombre max de cycles evolve (0 = illimité)
 MAX_AI_ROADMAP_ADDS=5                    # Max features ajoutées par l'IA entre deux pauses humaines
+ALIGNMENT_CHECK=true                     # Checkpoint d'alignement brief/code/roadmap entre les cycles evolve
+                                         # Génère un rapport, pose des questions ciblées à l'humain au prochain start.
+                                         # false = enchaîne les cycles sans pause d'alignement.
 
 # === GITHUB (optionnel — tout fonctionne sans) ===
 # Principe : local = source de vérité, GitHub = miroir de visibilité.
@@ -98,6 +102,7 @@ declare -A PHASE_TIMEOUTS=(
   ["self-improve"]=300      # 5min  — auto-amélioration
   ["strategy"]=300          # 5min  — génération roadmap
   ["evolve"]=300            # 5min  — évolution roadmap
+  ["alignment"]=120         # 2min  — rapport d'alignement
   ["research-initial"]=600  # 10min — recherche web
   ["research-epic"]=300     # 5min  — veille ciblée
   ["acceptance"]=300         # 5min  — validation acceptance epic

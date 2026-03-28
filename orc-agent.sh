@@ -74,11 +74,12 @@ get_run_status() {
     local saved_status
     saved_status=$(jq -r '.run_status // ""' "$dir/.orc/state.json" 2>/dev/null)
     case "$saved_status" in
-      completed)       echo "terminé|$GREEN" ;;
-      crashed)         echo "crashé|$RED" ;;
-      stopped)         echo "arrêté|$YELLOW" ;;
-      budget_exceeded) echo "budget dépassé|$RED" ;;
-      *)               echo "arrêté|$YELLOW" ;;
+      completed)          echo "terminé|$GREEN" ;;
+      crashed)            echo "crashé|$RED" ;;
+      stopped)            echo "arrêté|$YELLOW" ;;
+      budget_exceeded)    echo "budget dépassé|$RED" ;;
+      alignment_pending)  echo "alignement requis|$BLUE" ;;
+      *)                  echo "arrêté|$YELLOW" ;;
     esac
   else
     echo "arrêté|$YELLOW"

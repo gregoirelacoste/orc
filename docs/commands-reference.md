@@ -26,6 +26,8 @@ orc agent new mon-app --github public
 
 Lance l'orchestrateur en background. Reprend automatiquement si le projet a déjà avancé (crash recovery).
 
+Si le projet est en statut **alignement requis** (après un cycle evolve avec `ALIGNMENT_CHECK=true`), un wizard interactif se lance d'abord : il affiche le rapport d'alignement et pose des questions ciblées pour valider la direction avant de repartir.
+
 ```bash
 orc agent start mon-app
 ```

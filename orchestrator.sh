@@ -82,7 +82,8 @@ workflow_transition() {
     # Self-transitions (reprise dans le même état après crash/restart)
     bootstrap→bootstrap|research→research|strategy→strategy|features→features|evolve→evolve) valid=true ;;
     features→evolve|features→post-project) valid=true ;;
-    evolve→features|evolve→post-project) valid=true ;;
+    evolve→features|evolve→post-project|evolve→alignment_pending) valid=true ;;
+    alignment_pending→features|alignment_pending→stopped) valid=true ;;
     post-project→done) valid=true ;;
     *→crashed|*→stopped|*→budget_exceeded) valid=true ;;  # sorties d'urgence
   esac
@@ -138,7 +139,7 @@ get_model_pricing() {
 # Phases légères qui utilisent CLAUDE_MODEL_LIGHT si disponible
 # Phases non-code : pas besoin du modèle principal (text, recherche web, décision)
 # Phases légères (modèle léger). Critic + tech-debt utilisent le modèle PRINCIPAL
-LIGHT_PHASES="plan acceptance reflection reflect self-improve meta-retro quality strategy research-initial research-epic evolve user-docs"
+LIGHT_PHASES="plan acceptance reflection reflect self-improve meta-retro quality strategy research-initial research-epic evolve alignment user-docs"
 
 # Résoudre le modèle effectif pour une phase donnée
 # Usage: resolve_model "reflection" → affiche le modèle à utiliser
@@ -2204,6 +2205,111 @@ FBEOF
 }
 
 # ============================================================
+# WIZARD D'ALIGNEMENT (interactif, entre cycles evolve)
+# ============================================================
+
+# Lit le fichier alignment-response le plus récent et l'injecte dans le prompt
+read_alignment_response() {
+  local latest
+  latest=$(ls -t "$PROJECT_DIR/.orc/logs/alignment-response-"*.md 2>/dev/null | head -1)
+  if [ -n "$latest" ] && [ -f "$latest" ] && [ -s "$latest" ]; then
+    local content
+    content=$(cat "$latest")
+    echo "
+
+DIRECTIVES D'ALIGNEMENT DE L'HUMAIN (prioritaire — adapter le travail en conséquence) :
+$content"
+  fi
+}
+
+# Wizard interactif : pose les questions du rapport d'alignement une par une
+alignment_wizard() {
+  local cycle="$1"
+  local report_file="$PROJECT_DIR/.orc/logs/alignment-report-${cycle}.md"
+  local response_file="$PROJECT_DIR/.orc/logs/alignment-response-${cycle}.md"
+
+  # Si pas de terminal interactif, skip le wizard (mode nohup)
+  if [ ! -t 0 ]; then
+    log WARN "Alignment wizard ignoré (pas de terminal). Le rapport est dans : $report_file"
+    log WARN "Pour répondre manuellement, créer : $response_file"
+    return 0
+  fi
+
+  echo ""
+  printf "${CYAN}═══════════════════════════════════════════════════${NC}\n"
+  printf "${CYAN}  CHECKPOINT D'ALIGNEMENT — Cycle %s${NC}\n" "$cycle"
+  printf "${CYAN}  Features complétées : %s | Coût : \$%s USD${NC}\n" "$FEATURE_COUNT" "$TOTAL_COST_USD"
+  printf "${CYAN}═══════════════════════════════════════════════════${NC}\n"
+  echo ""
+
+  # Afficher le résumé du rapport si disponible
+  if [ -f "$report_file" ]; then
+    printf "${YELLOW}  Rapport d'alignement :${NC}\n"
+    echo ""
+    cat "$report_file"
+    echo ""
+    printf "${YELLOW}───────────────────────────────────────────────────${NC}\n"
+    echo ""
+  else
+    printf "${YELLOW}  Rapport d'alignement non disponible.${NC}\n"
+    printf "${YELLOW}  Consultez la roadmap et le brief pour le contexte.${NC}\n"
+    echo ""
+  fi
+
+  # Questions interactives
+  local responses=""
+
+  local questions=(
+    "La direction générale est-elle toujours la bonne ? (oui / ajustements à faire)"
+    "Parmi les features prévues, y en a-t-il à retirer ou réordonner ?"
+    "Y a-t-il un besoin nouveau non couvert par le brief ?"
+    "Quel est ton critère de \"suffisant\" pour ce projet ?"
+    "Feedback libre sur ce que tu as vu jusqu'ici ?"
+  )
+
+  printf "  ${GREEN}Réponds aux questions ci-dessous (Entrée = passer, q = quitter)${NC}\n"
+  echo ""
+
+  for i in "${!questions[@]}"; do
+    local qnum=$((i + 1))
+    printf "  ${CYAN}%d. %s${NC}\n" "$qnum" "${questions[$i]}"
+    local answer=""
+    local line
+    while IFS= read -rp "  > " line; do
+      if [ "$line" = "q" ]; then
+        log INFO "Wizard interrompu par l'utilisateur."
+        [ -n "$responses" ] && printf "  ${YELLOW}Réponses partielles conservées.${NC}\n"
+        break 2
+      fi
+      [ -z "$line" ] && break
+      answer="$answer$line
+"
+    done
+    if [ -n "$answer" ]; then
+      responses="$responses
+### Q${qnum}. ${questions[$i]}
+$answer"
+    fi
+    echo ""
+  done
+
+  # Sauvegarder les réponses
+  if [ -n "$responses" ]; then
+    mkdir -p "$PROJECT_DIR/.orc/logs"
+    cat > "$response_file" << ALEOF
+# Réponses d'alignement — Cycle $cycle
+Date : $(date '+%Y-%m-%d %H:%M:%S')
+$responses
+ALEOF
+    log INFO "Réponses d'alignement enregistrées : $response_file"
+    printf "  ${GREEN}Réponses enregistrées. Elles seront prises en compte dans le prochain cycle.${NC}\n"
+  else
+    printf "  ${YELLOW}Aucune réponse — le prochain cycle continue avec la direction actuelle.${NC}\n"
+  fi
+  echo ""
+}
+
+# ============================================================
 # VÉRIFICATIONS PRÉALABLES
 # ============================================================
 
@@ -2324,6 +2430,24 @@ if [ -n "${MAX_BUDGET_USD:-}" ]; then
 fi
 if [ "$TOTAL_COST_USD" != "0" ]; then
   log INFO "Reprise — coût cumulé : \$${TOTAL_COST_USD} USD"
+fi
+
+# ============================================================
+# REPRISE ALIGNMENT_PENDING — Wizard interactif
+# ============================================================
+
+if [ "$WORKFLOW_PHASE" = "alignment_pending" ]; then
+  log PHASE "REPRISE — CHECKPOINT D'ALIGNEMENT (cycle $EVOLVE_CYCLES)"
+  RUN_STATUS="running"
+
+  # Lancer le wizard interactif
+  alignment_wizard "$EVOLVE_CYCLES"
+
+  # Réinjecter dans le flow : reprendre la boucle features
+  AI_ROADMAP_ADDS=0  # Reset après validation humaine
+  workflow_transition "features"
+  save_state
+  log INFO "Alignement validé — reprise de la boucle de développement."
 fi
 
 # ============================================================
@@ -2502,7 +2626,7 @@ EOF
   plan_prompt=$(render_phase "03a-plan.md" \
     "FEATURE_NAME=$feature_name" \
     "N=$FEATURE_COUNT")
-  run_claude "$plan_prompt" 5 "$LOG_DIR/feature-$FEATURE_COUNT-plan.log" "plan" "$feature_name" || {
+  run_claude "$plan_prompt" "${MAX_TURNS_PLAN:-8}" "$LOG_DIR/feature-$FEATURE_COUNT-plan.log" "plan" "$feature_name" || {
     log WARN "Planification échouée — on continue sans plan."
   }
 
@@ -2550,6 +2674,14 @@ $gh_feedback"
 FEEDBACK HUMAIN SUR LA FEATURE PRÉCÉDENTE (en tenir compte) :
 $(cat "$prev_feedback")"
     log INFO "Feedback humain de la feature précédente injecté."
+  fi
+
+  # Injecter les réponses d'alignement du dernier checkpoint si présentes
+  alignment_response=$(read_alignment_response)
+  if [ -n "$alignment_response" ]; then
+    impl_prompt="$impl_prompt
+$alignment_response"
+    log INFO "Réponses d'alignement injectées dans le prompt."
   fi
 
   run_claude "$impl_prompt" "$MAX_TURNS_PER_INVOCATION" "$LOG_DIR/feature-$FEATURE_COUNT-impl.log" "implement" "$feature_name"
@@ -2988,10 +3120,30 @@ if [ ! -f "$PROJECT_DIR/DONE.md" ]; then
         AI_ROADMAP_ADDS=0  # Reset après validation
       fi
 
-      log INFO "Nouvelles features ajoutées — relancement de la boucle."
-      workflow_transition "features"
-      save_state
-      # Relancer la boucle englobante au lieu de exec "$0"
+      # --- Checkpoint d'alignement entre cycles ---
+      if [ "${ALIGNMENT_CHECK:-true}" = true ]; then
+        log PHASE "CHECKPOINT D'ALIGNEMENT — Cycle $EVOLVE_CYCLES"
+
+        # Générer le rapport d'alignement via Claude
+        alignment_prompt=$(render_phase "07b-alignment.md" "CYCLE=$EVOLVE_CYCLES")
+        run_claude "$alignment_prompt" 15 "$LOG_DIR/07b-alignment-$EVOLVE_CYCLES.log" "alignment" || {
+          log WARN "Génération rapport d'alignement échouée — on continue."
+        }
+
+        # Arrêter le run et attendre le prochain start pour le wizard
+        log INFO "Rapport d'alignement généré. Arrêt pour validation humaine."
+        notify "Cycle $EVOLVE_CYCLES terminé. Rapport d'alignement prêt. Relancer avec 'orc agent start' pour le wizard."
+        workflow_transition "alignment_pending"
+        RUN_STATUS="alignment_pending"
+        RUN_ENDED_AT=$(date -Iseconds)
+        save_state
+        print_cost_summary
+        exit 0
+      else
+        log INFO "Nouvelles features ajoutées — relancement de la boucle."
+        workflow_transition "features"
+        save_state
+      fi
     else
       MAIN_LOOP_CONTINUE=false
     fi

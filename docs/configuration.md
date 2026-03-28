@@ -45,6 +45,7 @@ Chaque projet a sa propre configuration dans `~/projects/<nom>/.orc/config.sh`. 
 | `AUTO_EVOLVE_ROADMAP` | true | L'IA peut ajouter des features à la roadmap |
 | `MAX_EVOLVE_CYCLES` | 2 | Cycles d'évolution max de la roadmap |
 | `MAX_AI_ROADMAP_ADDS` | 5 | Features max ajoutées par l'IA à la roadmap |
+| `ALIGNMENT_CHECK` | true | Checkpoint d'alignement brief/code/roadmap entre les cycles evolve. Génère un rapport et lance un wizard interactif au prochain `start` |
 
 ### Recherche
 

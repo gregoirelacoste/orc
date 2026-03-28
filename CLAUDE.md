@@ -157,7 +157,10 @@ Séquence de guards : `CLAUDE.md` existe ? → skip bootstrap. `.orc/research/IN
 Si `LINT_COMMAND` est défini, exécuté entre implement et la review adversariale. En cas d'échec, correction automatique par Claude (10 turns max) avant de lancer les tests.
 
 ### State machine (workflow_phase)
-`WORKFLOW_PHASE` dans `state.json` pilote le workflow global. Transitions validées par `workflow_transition()` : init → bootstrap → research → strategy → features → evolve → features (cycle) → post-project → done. Les guards fichier existants (CLAUDE.md, ROADMAP.md, etc.) restent comme filet de sécurité. La reprise après crash utilise `WORKFLOW_PHASE` pour savoir où reprendre.
+`WORKFLOW_PHASE` dans `state.json` pilote le workflow global. Transitions validées par `workflow_transition()` : init → bootstrap → research → strategy → features → evolve → alignment_pending → features (cycle) → post-project → done. Les guards fichier existants (CLAUDE.md, ROADMAP.md, etc.) restent comme filet de sécurité. La reprise après crash utilise `WORKFLOW_PHASE` pour savoir où reprendre.
+
+### Checkpoint d'alignement (alignment_pending)
+`ALIGNMENT_CHECK=true` (défaut) active un checkpoint entre les cycles evolve. Après evolve Option A (nouvelles features) : `phases/07b-alignment.md` génère un rapport d'alignement brief/code/roadmap dans `.orc/logs/alignment-report-N.md`, puis le run s'arrête en état `alignment_pending`. Au prochain `orc agent start`, `alignment_wizard()` lance un wizard interactif (5 questions ciblées). Les réponses sont sauvées dans `.orc/logs/alignment-response-N.md` et injectées dans le prompt des features suivantes via `read_alignment_response()`. En mode nohup, le wizard est ignoré (l'humain peut créer manuellement le fichier response).
 
 ### GitHub Integration (local-first, GitHub-augmented)
 **Principe** : local = source de vérité, GitHub = miroir de visibilité. Tout fonctionne sans GitHub. Chaque option est indépendante et off par défaut.
@@ -195,7 +198,7 @@ Pour diagnostiquer un run en cours sans relancer : lire `.orc/logs/orc-debug-liv
 `state.json` contient désormais : `current_feature`, `current_phase`, `phase_started_at`, `run_started_at`, `features_timeline[]` (historique avec status/timing/fix_attempts par feature), `functional_check_passed`, `run_status`, `run_ended_at`. Alimenté par `update_phase_tracking()`, `timeline_add()`, `timeline_update_last()`.
 
 ### Statut de sortie du run
-`run_status` dans `state.json` distingue 4 états : `running` (en cours), `completed` (fin normale), `crashed` (erreur non rattrapée ou signal), `stopped` (arrêt demandé par l'utilisateur). Écrit par `cleanup()` (→ crashed si encore running), la fin du script (→ completed), ou les handlers de stop (→ stopped). Affiché dans `orc status`, `orc dashboard` via `get_run_status()` dans `orc-agent.sh`.
+`run_status` dans `state.json` distingue 5 états : `running` (en cours), `completed` (fin normale), `crashed` (erreur non rattrapée ou signal), `stopped` (arrêt demandé par l'utilisateur), `alignment_pending` (attente wizard d'alignement). Écrit par `cleanup()` (→ crashed si encore running), la fin du script (→ completed), les handlers de stop (→ stopped), ou la fin d'un cycle evolve avec `ALIGNMENT_CHECK=true` (→ alignment_pending). Affiché dans `orc status`, `orc dashboard` via `get_run_status()` dans `orc-agent.sh`.
 
 ### Cochage fiable de ROADMAP.md
 `mark_feature_done_bash()` coche la feature dans ROADMAP.md via `sed` après chaque merge réussi. Double sécurité avec le cochage par Claude en phase reflect.
