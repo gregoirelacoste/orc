@@ -170,6 +170,12 @@ Si `LINT_COMMAND` est défini, exécuté entre implement et la review adversaria
 - **Dégradation gracieuse** : `gh` absent → tout fonctionne en local sans erreur.
 - Fonctions préfixées `gh_*` dans `orchestrator.sh` — Phase 1 (PR/tracking), Phase 2 (roadmap sync/feedback), Phase 3 (CI/releases).
 
+### Preflight checks (sécurité pré-merge)
+`preflight_merge()` vérifie avant chaque merge : fichiers sensibles (.env, credentials, .pem), suppressions massives (> 500 deletions, ratio > 3:1), fichiers CI/infra modifiés (warning), nombre de fichiers (> 30 = warning). Bloque le merge si fichiers sensibles ou suppressions massives.
+
+### Change reports
+`generate_change_report()` produit un rapport markdown (`logs/change-report-N.md`) avant chaque merge : fichiers modifiés, commits, métriques (lignes ajoutées/supprimées, coût).
+
 ### Détection de boucle fix
 `error_hash()` extrait les lignes contenant `error/fail/exception`, supprime les numéros de ligne, trie et hashe. Compare la structure de l'erreur (pas sa position). Même erreur 2x → prompt "change d'approche". 3x → abandon anticipé.
 

@@ -68,6 +68,8 @@ DEPLOY_COMMAND=""                        # Commande de déploiement (vide = dés
 COVERAGE_COMMAND=""                      # Commande de couverture de tests (vide = désactivé)
                                          # Ex: "npx vitest run --coverage --reporter=json" ou "pytest --cov --cov-report=term"
                                          # Doit afficher un % de couverture dans son output.
+MAX_FILES_PER_FEATURE=30                 # Alerte si une feature modifie plus de N fichiers
+MAX_DELETIONS_PER_FEATURE=500            # Bloque le merge si > N suppressions avec ratio > 3:1
 FUNCTIONAL_CHECK_COMMAND=""              # Vérification fonctionnelle post-feature (vide = désactivé)
                                          # L'app DOIT être fonctionnelle après chaque feature.
                                          # Ex: "npm start -- --check" ou "curl -sf http://localhost:3000/health"

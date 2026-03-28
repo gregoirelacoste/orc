@@ -454,6 +454,104 @@ update_changelog() {
   run_in_project "git add CHANGELOG.md 2>/dev/null && git commit --amend --no-edit 2>/dev/null" || true
 }
 
+# Preflight checks avant merge — vérifie que le changement est safe
+# Retourne 0 si OK, 1 si bloqué
+preflight_merge() {
+  local feature_name="$1"
+  local merge_ok=true
+
+  # 1. Fichiers sensibles modifiés ?
+  local sensitive_files
+  sensitive_files=$(run_in_project "git diff --name-only main 2>/dev/null" | grep -iE '\.env$|credentials|\.pem$|\.key$|secret|password' || true)
+  if [ -n "$sensitive_files" ]; then
+    log ERROR "PREFLIGHT BLOQUÉ : fichiers sensibles modifiés :"
+    log ERROR "  $sensitive_files"
+    notify "ALERTE : feature '$feature_name' modifie des fichiers sensibles : $sensitive_files"
+    merge_ok=false
+  fi
+
+  # 2. Suppressions massives ? (> 500 deletions ET ratio > 3:1)
+  local additions deletions
+  additions=$(run_in_project "git diff --stat main 2>/dev/null | tail -1 | grep -oP '\\d+ insertion' | grep -oP '\\d+'" || echo "0")
+  deletions=$(run_in_project "git diff --stat main 2>/dev/null | tail -1 | grep -oP '\\d+ deletion' | grep -oP '\\d+'" || echo "0")
+  additions=${additions:-0}; deletions=${deletions:-0}
+  if [ "$deletions" -gt 500 ] 2>/dev/null; then
+    local ratio=0
+    [ "$additions" -gt 0 ] && ratio=$(( deletions / additions ))
+    if [ "$ratio" -gt 3 ] 2>/dev/null; then
+      log ERROR "PREFLIGHT BLOQUÉ : suppressions massives ($deletions deletions, ratio $ratio:1)"
+      notify "ALERTE : feature '$feature_name' supprime massivement ($deletions lignes)"
+      merge_ok=false
+    fi
+  fi
+
+  # 3. Fichiers protégés ? (CI config)
+  local protected_modified
+  protected_modified=$(run_in_project "git diff --name-only main 2>/dev/null" | grep -iE '\.github/workflows|\.gitlab-ci|Dockerfile|docker-compose' || true)
+  if [ -n "$protected_modified" ]; then
+    log WARN "PREFLIGHT WARNING : fichiers CI/infra modifiés : $protected_modified"
+    # Warning seulement, pas bloquant
+  fi
+
+  # 4. Trop de fichiers modifiés ? (alerte > 30)
+  local files_count
+  files_count=$(run_in_project "git diff --name-only main 2>/dev/null | wc -l" || echo "0")
+  if [ "$files_count" -gt 30 ] 2>/dev/null; then
+    log WARN "PREFLIGHT WARNING : $files_count fichiers modifiés (seuil: 30)"
+  fi
+
+  if [ "$merge_ok" = false ]; then
+    log ERROR "Preflight checks BLOQUÉS — feature '$feature_name' non mergée."
+    return 1
+  fi
+
+  log INFO "Preflight checks OK ($files_count fichiers, +$additions/-$deletions)"
+  return 0
+}
+
+# Génère un rapport de changements pour une feature
+generate_change_report() {
+  local feature_name="$1"
+  local feature_num="$2"
+  local fix_attempts="${3:-0}"
+  local report="$LOG_DIR/change-report-${feature_num}.md"
+
+  {
+    echo "# Change Report — Feature #${feature_num}"
+    echo ""
+    echo "**Feature :** $feature_name"
+    echo "**Date :** $(date '+%Y-%m-%d %H:%M')"
+    echo "**Branche :** $(run_in_project "git branch --show-current 2>/dev/null" || echo "?")"
+    echo "**Fix attempts :** $fix_attempts"
+    echo ""
+
+    echo "## Fichiers modifiés"
+    echo '```'
+    run_in_project "git diff --stat main 2>/dev/null" || echo "(pas de diff)"
+    echo '```'
+    echo ""
+
+    echo "## Commits"
+    echo '```'
+    run_in_project "git log --oneline main..HEAD 2>/dev/null" || echo "(pas de commits)"
+    echo '```'
+    echo ""
+
+    echo "## Métriques"
+    local files additions deletions
+    files=$(run_in_project "git diff --name-only main 2>/dev/null | wc -l" || echo "0")
+    additions=$(run_in_project "git diff --stat main 2>/dev/null | tail -1 | grep -oP '\\d+ insertion' | grep -oP '\\d+'" || echo "0")
+    deletions=$(run_in_project "git diff --stat main 2>/dev/null | tail -1 | grep -oP '\\d+ deletion' | grep -oP '\\d+'" || echo "0")
+    echo "- Fichiers : ${files:-0}"
+    echo "- Lignes ajoutées : ${additions:-0}"
+    echo "- Lignes supprimées : ${deletions:-0}"
+    echo "- Coût cumulé : \$$TOTAL_COST_USD"
+    echo ""
+  } > "$report"
+
+  log INFO "Change report : $report"
+}
+
 # Vérification fonctionnelle post-feature
 run_functional_check() {
   local feature_name="$1"
@@ -2670,6 +2768,25 @@ Exemples de problèmes : performance dégradée, bundle trop gros, couverture in
     current_branch=$(run_in_project "git branch --show-current 2>/dev/null || echo ''")
     if [ -n "$current_branch" ] && [ "$current_branch" != "main" ]; then
       safe_feature_name="${feature_name//\'/}"
+
+      # Preflight checks (sécurité : fichiers sensibles, suppressions massives)
+      if ! preflight_merge "$feature_name"; then
+        log ERROR "Feature '$feature_name' bloquée par les preflight checks."
+        TOTAL_FAILURES=$((TOTAL_FAILURES + 1))
+        timeline_update_last "blocked" "$attempt"
+        notify "Feature '$feature_name' bloquée par preflight checks — intervention requise."
+        write_action_required "Preflight checks bloqués pour '$feature_name'" \
+          "La feature modifie des fichiers sensibles ou contient des suppressions massives. Vérifiez le diff et approuvez manuellement."
+        run_in_project "git checkout main 2>/dev/null || true"
+        # Passer directement à la feature suivante
+        CURRENT_PHASE=""
+        CURRENT_FEATURE=""
+        save_state
+        continue
+      fi
+
+      # Générer le change report avant merge
+      generate_change_report "$feature_name" "$FEATURE_COUNT" "$attempt"
 
       if gh_pr_mode; then
         # === MODE PR : créer une PR, merger via GitHub ===

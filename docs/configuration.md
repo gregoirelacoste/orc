@@ -65,7 +65,15 @@ Chaque projet a sa propre configuration dans `~/projects/<nom>/.orc/config.sh`. 
 | `LINT_COMMAND` | `npm run lint` | Commande lint (vide = désactivé) |
 | `QUALITY_COMMAND` | *(vide)* | Commande qualité (après tests, avant merge) |
 | `DEPLOY_COMMAND` | *(vide)* | Commande de déploiement en fin de projet |
+| `COVERAGE_COMMAND` | *(vide)* | Commande couverture tests (doit afficher un %) |
 | `FUNCTIONAL_CHECK_COMMAND` | *(vide)* | Vérification fonctionnelle post-feature |
+
+### Sécurité (preflight checks)
+
+| Paramètre | Défaut | Description |
+|---|---|---|
+| `MAX_FILES_PER_FEATURE` | 30 | Alerte si une feature modifie plus de N fichiers |
+| `MAX_DELETIONS_PER_FEATURE` | 500 | Bloque le merge si > N suppressions avec ratio > 3:1 |
 
 ### Modèles
 
