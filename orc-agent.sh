@@ -2017,6 +2017,7 @@ ${skill_content}"
       # Lancer Claude en one-shot avec le skill
       local output
       output=$(cd "$ORC_DIR" && claude -p \
+        --model claude-sonnet-4-6-20250514 \
         --dangerously-skip-permissions \
         --append-system-prompt "$watch_prompt" \
         "Vérifie le projet '${name}' maintenant. Projet dir: ${dir}" \
@@ -2029,6 +2030,23 @@ ${skill_content}"
         printf "${YELLOW}%s${NC}\n" "$output"
       else
         printf "%s\n" "$output"
+      fi
+
+      # Auto-stop si le run est dans un état terminal
+      if [ -f "$dir/.orc/state.json" ] && command -v jq &>/dev/null; then
+        local run_status
+        run_status=$(jq -r '.run_status // ""' "$dir/.orc/state.json" 2>/dev/null)
+        case "$run_status" in
+          completed)
+            printf "\n${GREEN}Run terminé.${NC} Watch arrêté.\n"; exit 0 ;;
+          stopped)
+            printf "\n${YELLOW}Run arrêté.${NC} Watch arrêté.\n"; exit 0 ;;
+          budget_exceeded)
+            printf "\n${RED}Budget dépassé.${NC} Watch arrêté.\n"; exit 0 ;;
+          alignment_pending)
+            printf "\n${BLUE}Alignement requis.${NC} Relancer : ${CYAN}orc agent start %s${NC}\n" "$name"
+            printf "Watch arrêté.\n"; exit 0 ;;
+        esac
       fi
 
       # Attendre l'intervalle (interruptible par Ctrl+C)
