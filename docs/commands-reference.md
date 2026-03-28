@@ -32,6 +32,23 @@ Si le projet est en statut **alignement requis** (après un cycle evolve avec `A
 orc agent start mon-app
 ```
 
+### `orc watch <nom> [options]`
+
+Surveillance autonome d'un run. Lance Claude en boucle pour diagnostiquer crashes, corriger les bugs orc, et relancer automatiquement.
+
+| Option | Description |
+|---|---|
+| *(aucune)* | Boucle toutes les 3 minutes (défaut) |
+| `--interval 5m` | Changer l'intervalle |
+| `--interactive` | Mode chat (opérateur interactif) |
+
+```bash
+orc watch mon-app                    # boucle auto 3min
+orc watch mon-app --interval 5m     # boucle 5min
+orc watch mon-app --interactive     # mode chat opérateur
+orc w mon-app                       # raccourci
+```
+
 ### `orc agent stop <nom>`
 
 Arrête proprement l'orchestrateur (tue le process Claude en cours, sauve l'état).

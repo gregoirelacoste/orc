@@ -1896,6 +1896,96 @@ cmd_dashboard() {
 }
 
 # ============================================================
+# COMMANDE : watch (opérateur autonome)
+# ============================================================
+
+cmd_watch() {
+  local name="${1:-}"
+  [ -z "$name" ] && die "Usage : orc watch <nom> [--interval 3m] [--interactive]"
+  require_project "$name"
+  shift || true
+
+  local interval="3m"
+  local interactive=false
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --interval|-i)
+        interval="${2:-3m}"
+        [ -z "${2:-}" ] && die "--interval nécessite une durée (ex: 3m, 5m)"
+        shift 2
+        ;;
+      --interactive|--chat)
+        interactive=true
+        shift
+        ;;
+      --loop|-l)
+        # --loop est un alias implicite (le mode par défaut est déjà en boucle)
+        shift
+        ;;
+      *) die "Option inconnue : $1. Usage : orc watch <nom> [--interval 3m] [--interactive]" ;;
+    esac
+  done
+
+  local dir
+  dir=$(project_dir "$name")
+
+  command -v claude &>/dev/null || die "Claude Code CLI non installé."
+
+  # Lire le skill orc-watch
+  local skill_file="$ORC_DIR/.claude/skills/orc-watch.md"
+  [ -f "$skill_file" ] || die "Skill orc-watch.md non trouvé dans $ORC_DIR/.claude/skills/"
+
+  # Extraire le contenu du skill (sans le frontmatter)
+  local skill_content
+  skill_content=$(awk '/^---$/{n++; next} n>=2' "$skill_file")
+
+  # Construire le contexte opérateur
+  local watch_prompt="Tu es l'opérateur du projet '${name}' orchestré par ORC.
+Répertoire du projet : ${dir}
+Répertoire orc (template) : ${ORC_DIR}
+
+${skill_content}"
+
+  if [ "$interactive" = true ]; then
+    # Mode interactif : session Claude avec contexte opérateur
+    printf "${BOLD}orc watch${NC} — %s ${CYAN}(interactif)${NC}\n" "$name"
+    printf "${DIM}Opérateur autonome avec contexte projet. Tape tes commandes.${NC}\n\n"
+
+    cd "$ORC_DIR" && claude --append-system-prompt "$watch_prompt"
+  else
+    # Mode boucle : surveillance continue
+    printf "${BOLD}orc watch${NC} — %s ${CYAN}(boucle toutes les %s)${NC}\n" "$name" "$interval"
+    printf "${DIM}Ctrl+C pour arrêter. --interactive pour le mode chat.${NC}\n\n"
+
+    while true; do
+      local timestamp
+      timestamp=$(date '+%H:%M:%S')
+      printf "${DIM}[%s]${NC} " "$timestamp"
+
+      # Lancer Claude en one-shot avec le skill
+      local output
+      output=$(cd "$ORC_DIR" && claude -p \
+        --append-system-prompt "$watch_prompt" \
+        "Vérifie le projet '${name}' maintenant. Projet dir: ${dir}" \
+        2>&1) || true
+
+      # Afficher la sortie (colorée si contient des mots-clés)
+      if echo "$output" | grep -qi "crash\|erreur\|bloqué\|fix"; then
+        printf "${RED}%s${NC}\n" "$output"
+      elif echo "$output" | grep -qi "warning\|roadmap item"; then
+        printf "${YELLOW}%s${NC}\n" "$output"
+      else
+        printf "%s\n" "$output"
+      fi
+
+      # Attendre l'intervalle (interruptible par Ctrl+C)
+      sleep "$interval"
+    done
+  fi
+}
+
+# ============================================================
 # DISPATCH AGENT
 # ============================================================
 
@@ -1914,6 +2004,7 @@ agent_dispatch() {
     github)    cmd_github "$@" ;;
     env)       cmd_env "$@" ;;
     adopt)     cmd_adopt "$@" ;;
+    watch)     cmd_watch "$@" ;;
     update)    cmd_update ;;
     help|-h|--help) cmd_agent_help ;;
     *) die "Commande inconnue : agent $subcmd. Voir : orc agent help" ;;

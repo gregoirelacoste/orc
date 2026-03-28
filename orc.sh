@@ -73,6 +73,8 @@ orc_help() {
   printf "    ${CYAN}orc agent status <nom>${NC}            Détail + barre de progression + ETA\n"
   printf "    ${CYAN}orc dashboard <nom>${NC}               Dashboard live (auto-refresh)\n"
   printf "    ${CYAN}orc agent logs <nom>${NC}              Logs temps réel\n"
+  printf "    ${CYAN}orc watch <nom>${NC}                  Surveillance auto (boucle 3min)\n"
+  printf "    ${CYAN}orc watch <nom> --interactive${NC}    Surveillance en mode chat\n"
   echo ""
   printf "  ${BOLD}Roadmap :${NC}\n"
   printf "    ${CYAN}orc roadmap${NC}                       Roadmap orc (développement du template)\n"
@@ -96,7 +98,7 @@ orc_help() {
   printf "    ${CYAN}orc docs${NC}                          Index de la documentation\n"
   printf "    ${CYAN}orc docs <sujet>${NC}                  Ouvrir une page (getting-started, commands, etc.)\n"
   echo ""
-  printf "  ${DIM}Raccourcis : 'orc s' = status, 'orc l <nom>' = logs, 'orc r' = roadmap, 'orc dash <nom>' = dashboard${NC}\n"
+  printf "  ${DIM}Raccourcis : 'orc s' = status, 'orc l <nom>' = logs, 'orc r' = roadmap, 'orc dash <nom>' = dashboard, 'orc w <nom>' = watch${NC}\n"
   echo ""
 }
 
@@ -202,6 +204,10 @@ case "$COMMAND" in
   chat|c)
     source "$ORC_DIR/orc-agent.sh"
     cmd_chat "$@"
+    ;;
+  watch|w)
+    source "$ORC_DIR/orc-agent.sh"
+    cmd_watch "$@"
     ;;
   help|-h|--help)
     orc_help
