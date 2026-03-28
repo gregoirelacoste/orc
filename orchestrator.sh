@@ -72,8 +72,8 @@ workflow_transition() {
   local valid=false
   case "$WORKFLOW_PHASE→$target" in
     init→bootstrap|init→research|init→strategy|init→features) valid=true ;;  # premier lancement
-    crashed→bootstrap|crashed→research|crashed→strategy|crashed→features) valid=true ;;  # reprise après crash
-    stopped→bootstrap|stopped→research|stopped→strategy|stopped→features) valid=true ;;  # reprise après arrêt
+    crashed→bootstrap|crashed→research|crashed→strategy|crashed→features|crashed→post-project) valid=true ;;  # reprise après crash
+    stopped→bootstrap|stopped→research|stopped→strategy|stopped→features|stopped→post-project) valid=true ;;  # reprise après arrêt
     budget_exceeded→bootstrap|budget_exceeded→research|budget_exceeded→strategy|budget_exceeded→features) valid=true ;;  # reprise après budget
     done→bootstrap|done→research|done→strategy|done→features) valid=true ;;  # relancement volontaire
     bootstrap→research|bootstrap→strategy|bootstrap→features) valid=true ;;
@@ -2451,6 +2451,15 @@ if [ "$WORKFLOW_PHASE" = "alignment_pending" ]; then
   log INFO "Alignement validé — reprise de la boucle de développement."
 fi
 
+# Reprise après crash en post-project : sauter directement à post-project
+# (évite de re-générer la stratégie quand le projet est terminé)
+SKIP_TO_POST_PROJECT=false
+if [ -f "$PROJECT_DIR/DONE.md" ] && [[ "$WORKFLOW_PHASE" =~ ^(crashed|stopped)$ ]]; then
+  log INFO "Reprise post-projet détectée (DONE.md existe, workflow=$WORKFLOW_PHASE) — saut direct."
+  SKIP_TO_POST_PROJECT=true
+  RUN_STATUS="running"
+fi
+
 # ============================================================
 # PHASE 0 — BOOTSTRAP
 # ============================================================
@@ -2543,7 +2552,7 @@ fi
 # PHASE 2 — STRATÉGIE
 # ============================================================
 
-if ! grep -q '^\- \[ \]' "$PROJECT_DIR/.orc/ROADMAP.md" 2>/dev/null; then
+if [ "$SKIP_TO_POST_PROJECT" != true ] && ! grep -q '^\- \[ \]' "$PROJECT_DIR/.orc/ROADMAP.md" 2>/dev/null; then
   workflow_transition "strategy"
   log PHASE "PHASE 2 — STRATÉGIE"
 
@@ -2559,9 +2568,16 @@ fi
 # ============================================================
 
 # Boucle englobante : feature loop + evolve, sans exec "$0" restart
-workflow_transition "features"
+if [ "$SKIP_TO_POST_PROJECT" != true ]; then
+  workflow_transition "features"
+fi
 MAIN_LOOP_CONTINUE=true
 while [ "$MAIN_LOOP_CONTINUE" = true ]; do
+
+if [ "$SKIP_TO_POST_PROJECT" = true ]; then
+  log INFO "Saut de la boucle features (reprise post-projet)."
+  MAIN_LOOP_CONTINUE=false
+fi
 
 log PHASE "PHASE 3 — BOUCLE DE DÉVELOPPEMENT"
 
@@ -3161,6 +3177,11 @@ done  # fin MAIN_LOOP (while MAIN_LOOP_CONTINUE)
 
 workflow_transition "post-project"
 notify "Projet terminé ! Features: $FEATURE_COUNT, Échecs: $TOTAL_FAILURES, Coût: \$$TOTAL_COST_USD"
+
+# Skip self-improve si déjà fait (reprise après crash en post-project)
+if [ "$SKIP_TO_POST_PROJECT" = true ] && [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
+  log INFO "Auto-amélioration déjà faite — skip (reprise post-projet)."
+else
 log PHASE "AUTO-AMÉLIORATION DE L'ORCHESTRATEUR"
 
 run_claude "$(cat <<'IMPROVE'
@@ -3201,6 +3222,7 @@ if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
   } > "$learning_file"
   log INFO "Learnings sauvés dans le template : $learning_file"
 fi
+fi  # fin du guard SKIP_TO_POST_PROJECT self-improve
 
 # ============================================================
 # DOCUMENTATION UTILISATEUR
