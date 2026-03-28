@@ -3190,7 +3190,8 @@ log INFO "Suggestions d'amélioration : orchestrator-improvements.md"
 
 # Extraire les learnings et les copier dans le template pour les futurs projets
 if [ -f "$PROJECT_DIR/orchestrator-improvements.md" ]; then
-  learning_file="$SCRIPT_DIR/learnings/$(date +%Y-%m-%d)-${PROJECT_NAME:-project}.md"
+  _orc_real_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")
+  learning_file="$_orc_real_dir/learnings/$(date +%Y-%m-%d)-${PROJECT_NAME:-project}.md"
   {
     echo "# Learnings — ${PROJECT_NAME:-project}"
     echo "Date : $(date '+%Y-%m-%d')"
